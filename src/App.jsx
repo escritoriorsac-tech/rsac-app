@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
-  Wallet, Plus, X, Trash2, Search, LogOut, Pencil
+  Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -26,7 +26,7 @@ const STATUS_COLORS = {
 };
 
 // camelCase (JS) <-> snake_case (Postgres)
-const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg });
+const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
@@ -56,7 +56,7 @@ async function loadAll() {
 }
 
 function toPayload(key, row) {
-  if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null };
+  if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
@@ -394,9 +394,10 @@ function LoginScreen() {
   );
 }
 
-function ClientFolder({ client, cases, finance, onBack, onEdit, onDelete, onOpenCase }) {
+function ClientFolder({ client, cases, finance, onBack, onEdit, onDelete, onOpenCase, onToggleOptIn }) {
   const linkedCases = cases.filter((c) => c.clientId === client.id);
   const linkedFinance = finance.filter((f) => f.clientId === client.id);
+  const optedIn = client.newsletterOptIn !== false;
   return (
     <>
       <DetailHeader onBack={onBack} title={client.name}
@@ -407,6 +408,19 @@ function ClientFolder({ client, cases, finance, onBack, onEdit, onDelete, onOpen
         {client.type === "PF" && <InfoRow label="RG" value={client.rg} />}
         <InfoRow label="E-mail" value={client.email} />
         <InfoRow label="Telefone" value={client.phone} />
+      </SectionCard>
+      <SectionCard title="Newsletter mensal">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 13.5, color: INK }}>
+            {optedIn ? "Recebe a newsletter mensal" : "Não recebe a newsletter mensal"}
+          </div>
+          <button onClick={onToggleOptIn} style={{
+            background: optedIn ? NAVY : "#EAE7DC", color: optedIn ? "#EDE6D8" : MUTED,
+            border: "none", borderRadius: 20, padding: "6px 14px", fontSize: 12.5, cursor: "pointer",
+          }}>
+            {optedIn ? "Desativar" : "Ativar"}
+          </button>
+        </div>
       </SectionCard>
       <SectionCard title={`Casos vinculados (${linkedCases.length})`}>
         {linkedCases.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum caso vinculado a este cliente.</p>}
@@ -446,6 +460,52 @@ function CaseFolder({ item, client, onBack, onEdit, onDelete, onOpenClient }) {
   );
 }
 
+function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [scheduledFor, setScheduledFor] = useState(todayISO());
+  const [error, setError] = useState("");
+  const optedInCount = clients.filter((c) => c.newsletterOptIn !== false && c.email).length;
+
+  const submit = () => {
+    if (!subject.trim() || !body.trim() || !scheduledFor) { setError("Preencha assunto, conteúdo e data de envio."); return; }
+    setError("");
+    onSave({ subject: subject.trim(), htmlBody: body.trim(), scheduledFor });
+    setSubject(""); setBody("");
+  };
+
+  return (
+    <>
+      <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Newsletter</h1>
+      <p style={{ color: MUTED, fontSize: 13.5, margin: "0 0 20px" }}>
+        Visível somente para administradores. Enviada automaticamente na data agendada para {optedInCount} cliente(s) com recebimento ativado.
+      </p>
+
+      <SectionCard title="Nova edição">
+        <Field label="Assunto do e-mail"><input style={inputStyle} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Ex: Novidades tributárias — Setembro" /></Field>
+        <Field label="Conteúdo (cada parágrafo em uma linha)">
+          <textarea style={{ ...inputStyle, minHeight: 160, resize: "vertical", fontFamily: "inherit" }}
+            value={body} onChange={(e) => setBody(e.target.value)} placeholder="Escreva o conteúdo da newsletter deste mês…" />
+        </Field>
+        <Field label="Data de envio"><input type="date" style={inputStyle} value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} /></Field>
+        {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={submit} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>Agendar envio</button>
+        </div>
+      </SectionCard>
+
+      <SectionCard title={`Edições (${newsletters.length})`}>
+        {newsletters.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma newsletter agendada ainda.</p>}
+        {newsletters.map((n) => (
+          <RowCard key={n.id} title={n.subject} subtitle={`Envio em ${fmtDate(n.scheduled_for)}${n.sent ? " · enviada" : " · agendada"}`}
+            right={<Badge text={n.sent ? "Encerrado" : "Ativo"} />}
+            onDelete={n.sent ? undefined : () => onDelete(n.id)} />
+        ))}
+      </SectionCard>
+    </>
+  );
+}
+
 export default function RSACApp() {
   const [session, setSession] = useState(undefined);
   const [loading, setLoading] = useState(true);
@@ -461,6 +521,8 @@ export default function RSACApp() {
   const [editingCase, setEditingCase] = useState(null);
   const [viewClient, setViewClient] = useState(null);
   const [viewCase, setViewCase] = useState(null);
+  const [role, setRole] = useState(null);
+  const [newsletters, setNewsletters] = useState([]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -471,8 +533,15 @@ export default function RSACApp() {
   useEffect(() => {
     if (!session) return;
     setLoading(true);
-    loadAll().then((d) => {
+    loadAll().then(async (d) => {
       setClients(d.clients); setCases(d.cases); setTasks(d.tasks); setAppts(d.appts); setFinance(d.finance);
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
+      const r = profile?.role || "staff";
+      setRole(r);
+      if (r === "admin") {
+        const { data: nl } = await supabase.from("newsletters").select("*").order("scheduled_for", { ascending: false });
+        setNewsletters(nl || []);
+      }
       setLoading(false);
     });
   }, [session]);
@@ -534,7 +603,28 @@ export default function RSACApp() {
     { id: "tasks", label: "Tarefas", icon: CheckSquare },
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
     { id: "finance", label: "Financeiro", icon: Wallet },
+    ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
   ];
+
+  const saveNewsletter = async (values) => {
+    const { data, error } = await supabase.from("newsletters").insert([{
+      subject: values.subject, html_body: values.htmlBody, scheduled_for: values.scheduledFor,
+    }]).select();
+    if (!error && data) setNewsletters((prev) => [data[0], ...prev]);
+  };
+
+  const deleteNewsletter = async (id) => {
+    setNewsletters((prev) => prev.filter((n) => n.id !== id));
+    await supabase.from("newsletters").delete().eq("id", id);
+  };
+
+  const toggleOptIn = async (client) => {
+    const updated = await editRow("clients", client.id, { ...client, newsletterOptIn: !client.newsletterOptIn });
+    if (updated) {
+      setClients((prev) => prev.map((c) => c.id === client.id ? updated : c));
+      setViewClient((v) => (v && v.id === client.id ? updated : v));
+    }
+  };
 
   if (session === undefined) {
     return <div style={{ padding: 40, textAlign: "center", color: MUTED, fontFamily: "Georgia, serif" }}>Carregando…</div>;
@@ -618,7 +708,8 @@ export default function RSACApp() {
               onBack={() => setViewClient(null)}
               onEdit={() => { setEditingClient(viewClient); setModal("client"); }}
               onDelete={() => removeClientAndClose(viewClient.id)}
-              onOpenCase={(c) => { setViewClient(null); setTab("cases"); setViewCase(c); }} />
+              onOpenCase={(c) => { setViewClient(null); setTab("cases"); setViewCase(c); }}
+              onToggleOptIn={() => toggleOptIn(viewClient)} />
           ) : (
             <ListPage title="Clientes" subtitle="Pessoas físicas e jurídicas atendidas pelo escritório." onAdd={() => { setEditingClient(null); setModal("client"); }}>
               <SearchBar value={search} onChange={setSearch} placeholder="Buscar cliente…" />
@@ -704,6 +795,10 @@ export default function RSACApp() {
             ))}
             {finance.length === 0 && <Empty text="Nenhum lançamento cadastrado." />}
           </>
+        )}
+
+        {tab === "newsletter" && role === "admin" && (
+          <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
         )}
       </div>
 
