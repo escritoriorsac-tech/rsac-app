@@ -27,24 +27,31 @@ const STATUS_COLORS = {
 
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in });
-const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status });
-const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done });
+const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link });
+const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id });
+const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description });
+const toNote = (r) => ({ id: r.id, caseId: r.case_id, date: r.note_date, content: r.content });
+const toDoc = (r) => ({ id: r.id, caseId: r.case_id, name: r.name, driveLink: r.drive_link });
 
 const TABLE_BY_KEY = {
   clients: "clients", cases: "cases", tasks: "tasks",
   appts: "appointments", finance: "finance_entries",
+  events: "case_events", notes: "case_notes", documents: "case_documents",
 };
-const MAPPER_BY_KEY = { clients: toClient, cases: toCase, tasks: toTask, appts: toAppt, finance: toFinance };
+const MAPPER_BY_KEY = { clients: toClient, cases: toCase, tasks: toTask, appts: toAppt, finance: toFinance, events: toEvent, notes: toNote, documents: toDoc };
 
 async function loadAll() {
-  const [c, cs, t, a, f] = await Promise.all([
+  const [c, cs, t, a, f, ev, no, doc] = await Promise.all([
     supabase.from("clients").select("*").order("created_at"),
     supabase.from("cases").select("*").order("created_at"),
     supabase.from("tasks").select("*").order("created_at"),
     supabase.from("appointments").select("*").order("date"),
     supabase.from("finance_entries").select("*").order("date"),
+    supabase.from("case_events").select("*").order("event_date"),
+    supabase.from("case_notes").select("*").order("note_date", { ascending: false }),
+    supabase.from("case_documents").select("*").order("created_at"),
   ]);
   return {
     clients: (c.data || []).map(toClient),
@@ -52,15 +59,21 @@ async function loadAll() {
     tasks: (t.data || []).map(toTask),
     appts: (a.data || []).map(toAppt),
     finance: (f.data || []).map(toFinance),
+    events: (ev.data || []).map(toEvent),
+    notes: (no.data || []).map(toNote),
+    documents: (doc.data || []).map(toDoc),
   };
 }
 
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true };
-  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status };
-  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false };
+  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null };
+  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null };
+  if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description };
+  if (key === "notes") return { case_id: row.caseId, note_date: row.date || todayISO(), content: row.content };
+  if (key === "documents") return { case_id: row.caseId, name: row.name, drive_link: row.driveLink || null };
   return row;
 }
 
@@ -255,7 +268,7 @@ function SubmitRow({ onClose, onSubmit }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, editing, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onAddAppt, onAddFinance }) {
+function FormLayer({ modal, onClose, clients, editing, taskCaseId, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onAddAppt, onAddFinance, onAddEvent, onAddNote, onAddDoc }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -287,17 +300,42 @@ function FormLayer({ modal, onClose, clients, editing, onAddClient, onEditClient
   if (modal === "case") {
     const [title, setTitle] = useState(editing?.title || ""); const [clientId, setClientId] = useState(editing?.clientId || clients[0]?.id || "");
     const [number, setNumber] = useState(editing?.number || ""); const [area, setArea] = useState(editing?.area || ""); const [status, setStatus] = useState(editing?.status || "Ativo");
+    const [caseType, setCaseType] = useState(editing?.caseType || "Judicial");
+    const [tribunal, setTribunal] = useState(editing?.tribunal || ""); const [comarca, setComarca] = useState(editing?.comarca || "");
+    const [instancia, setInstancia] = useState(editing?.instancia || ""); const [vara, setVara] = useState(editing?.vara || "");
+    const [tribunalLink, setTribunalLink] = useState(editing?.tribunalLink || "");
     return (
       <Modal title={editing ? "Editar caso" : "Novo caso"} onClose={onClose}>
         <Field label="Título do caso"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Planejamento sucessório" /></Field>
         <Field label="Cliente"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">Selecionar…</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+        <Field label="Natureza do caso">
+          <div style={{ display: "flex", gap: 8 }}>
+            {["Consultoria", "Judicial"].map((t) => (
+              <div key={t} onClick={() => setCaseType(t)} style={{
+                flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 6, cursor: "pointer",
+                border: caseType === t ? "1.5px solid #B08D57" : "1px solid #E3E0D6",
+                background: caseType === t ? "rgba(176,141,87,0.1)" : "#fff",
+                fontSize: 13, color: caseType === t ? NAVY : MUTED,
+              }}>{t}</div>
+            ))}
+          </div>
+        </Field>
+        {caseType === "Judicial" && (
+          <>
+            <Field label="Tribunal"><input style={inputStyle} value={tribunal} onChange={(e) => setTribunal(e.target.value)} placeholder="Ex: TJ-SP" /></Field>
+            <Field label="Comarca"><input style={inputStyle} value={comarca} onChange={(e) => setComarca(e.target.value)} placeholder="Ex: São Paulo" /></Field>
+            <Field label="Instância"><input style={inputStyle} value={instancia} onChange={(e) => setInstancia(e.target.value)} placeholder="Ex: 1ª" /></Field>
+            <Field label="Vara"><input style={inputStyle} value={vara} onChange={(e) => setVara(e.target.value)} placeholder="Ex: 1ª Vara Cível" /></Field>
+            <Field label="Link de consulta processual (opcional)"><input style={inputStyle} value={tribunalLink} onChange={(e) => setTribunalLink(e.target.value)} placeholder="https://..." /></Field>
+          </>
+        )}
         <Field label="Número do processo (opcional)"><input style={inputStyle} value={number} onChange={(e) => setNumber(e.target.value)} /></Field>
         <Field label="Área"><input style={inputStyle} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Tributário, empresarial…" /></Field>
         <Field label="Status"><select style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}><option>Ativo</option><option>Suspenso</option><option>Encerrado</option></select></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Informe o título do caso."); return; }
-          const values = { title: title.trim(), clientId, number, area, status };
+          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink };
           if (editing) onEditCase(editing.id, values); else onAddCase(values);
         }} />
       </Modal>
@@ -307,11 +345,11 @@ function FormLayer({ modal, onClose, clients, editing, onAddClient, onEditClient
   if (modal === "task") {
     const [title, setTitle] = useState(""); const [dueDate, setDueDate] = useState("");
     return (
-      <Modal title="Nova tarefa" onClose={onClose}>
+      <Modal title={taskCaseId ? "Nova tarefa do caso" : "Nova tarefa"} onClose={onClose}>
         <Field label="Descrição"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Protocolar manifestação" /></Field>
         <Field label="Prazo (opcional)"><input type="date" style={inputStyle} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
-        <SubmitRow onClose={onClose} onSubmit={() => { if (!title.trim()) { setError("Descreva a tarefa."); return; } onAddTask({ title: title.trim(), dueDate }); }} />
+        <SubmitRow onClose={onClose} onSubmit={() => { if (!title.trim()) { setError("Descreva a tarefa."); return; } onAddTask({ title: title.trim(), dueDate, caseId: taskCaseId || null }); }} />
       </Modal>
     );
   }
@@ -344,6 +382,42 @@ function FormLayer({ modal, onClose, clients, editing, onAddClient, onEditClient
         <Field label="Cliente (opcional)"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => { if (!description.trim() || !amount) { setError("Informe descrição e valor."); return; } onAddFinance({ description: description.trim(), amount: Number(amount), type, date, clientId }); }} />
+      </Modal>
+    );
+  }
+
+  if (modal === "event") {
+    const [date, setDate] = useState(todayISO()); const [description, setDescription] = useState("");
+    return (
+      <Modal title="Novo evento na timeline" onClose={onClose}>
+        <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Descrição"><input style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Juntada de petição" /></Field>
+        {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <SubmitRow onClose={onClose} onSubmit={() => { if (!description.trim()) { setError("Descreva o evento."); return; } onAddEvent({ caseId: taskCaseId, date, description: description.trim() }); }} />
+      </Modal>
+    );
+  }
+
+  if (modal === "note") {
+    const [date, setDate] = useState(todayISO()); const [content, setContent] = useState("");
+    return (
+      <Modal title="Nova anotação" onClose={onClose}>
+        <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Anotação"><textarea style={{ ...inputStyle, minHeight: 100, resize: "vertical", fontFamily: "inherit" }} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Escreva a anotação…" /></Field>
+        {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <SubmitRow onClose={onClose} onSubmit={() => { if (!content.trim()) { setError("Escreva a anotação."); return; } onAddNote({ caseId: taskCaseId, date, content: content.trim() }); }} />
+      </Modal>
+    );
+  }
+
+  if (modal === "document") {
+    const [name, setName] = useState(""); const [driveLink, setDriveLink] = useState("");
+    return (
+      <Modal title="Novo documento" onClose={onClose}>
+        <Field label="Nome do documento"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Petição inicial" /></Field>
+        <Field label="Link no Google Drive (opcional)"><input style={inputStyle} value={driveLink} onChange={(e) => setDriveLink(e.target.value)} placeholder="https://drive.google.com/..." /></Field>
+        {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <SubmitRow onClose={onClose} onSubmit={() => { if (!name.trim()) { setError("Informe o nome do documento."); return; } onAddDoc({ caseId: taskCaseId, name: name.trim(), driveLink }); }} />
       </Modal>
     );
   }
@@ -439,15 +513,58 @@ function ClientFolder({ client, cases, finance, onBack, onEdit, onDelete, onOpen
   );
 }
 
-function CaseFolder({ item, client, onBack, onEdit, onDelete, onOpenClient }) {
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const today = new Date(todayISO() + "T00:00:00");
+  const target = new Date(dateStr + "T00:00:00");
+  return Math.round((target - today) / (1000 * 60 * 60 * 24));
+}
+
+function CaseFolder({
+  item, client, events, tasks, notes, documents,
+  onBack, onEdit, onDelete, onOpenClient,
+  onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask,
+  onAddNote, onDeleteNote, onAddDoc, onDeleteDoc,
+}) {
+  const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
+  const caseTasks = tasks.filter((t) => t.caseId === item.id);
+  const caseNotes = notes.filter((n) => n.caseId === item.id);
+  const caseDocs = documents.filter((d) => d.caseId === item.id);
+  const doneCount = caseTasks.filter((t) => t.done).length;
+  const progress = caseTasks.length ? Math.round((doneCount / caseTasks.length) * 100) : 0;
+
   return (
     <>
-      <DetailHeader onBack={onBack} title={item.title} badge={<Badge text={item.status} />} onEdit={onEdit} onDelete={onDelete} />
-      <SectionCard title="Dados do caso">
-        <InfoRow label="Número" value={item.number} />
-        <InfoRow label="Área" value={item.area} />
-        <InfoRow label="Status" value={item.status} />
-      </SectionCard>
+      <DetailHeader onBack={onBack} title={item.title}
+        badge={<span style={{ display: "flex", gap: 6 }}><Badge text={item.status} /><span style={{ fontSize: 11, background: "#F1EFE8", color: MUTED, padding: "2px 9px", borderRadius: 12 }}>{item.caseType}</span></span>}
+        onEdit={onEdit} onDelete={onDelete} />
+
+      {item.caseType === "Judicial" && (
+        <SectionCard title="Dados processuais">
+          <InfoRow label="Número" value={item.number} />
+          <InfoRow label="Área" value={item.area} />
+          <InfoRow label="Tribunal" value={item.tribunal} />
+          <InfoRow label="Comarca" value={item.comarca} />
+          <InfoRow label="Instância" value={item.instancia} />
+          <InfoRow label="Vara" value={item.vara} />
+          {item.tribunalLink && (
+            <div style={{ marginTop: 10 }}>
+              <a href={item.tribunalLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", textDecoration: "none" }}>
+                Consultar no tribunal ↗
+              </a>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {item.caseType !== "Judicial" && (
+        <SectionCard title="Dados do caso">
+          <InfoRow label="Número" value={item.number} />
+          <InfoRow label="Área" value={item.area} />
+          <InfoRow label="Status" value={item.status} />
+        </SectionCard>
+      )}
+
       <SectionCard title="Cliente">
         {client ? (
           <RowCard onClick={() => onOpenClient(client)}
@@ -456,6 +573,98 @@ function CaseFolder({ item, client, onBack, onEdit, onDelete, onOpenClient }) {
           <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum cliente vinculado.</p>
         )}
       </SectionCard>
+
+      <SectionCard title={item.caseType === "Judicial" ? "Timeline processual" : "Timeline do caso"}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+          {caseEvents.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum evento registrado ainda.</p>}
+          {caseEvents.map((e) => (
+            <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderLeft: "2px solid #B08D57", paddingLeft: 10 }}>
+              <div>
+                <div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(e.date)}</div>
+                <div style={{ fontSize: 13, color: INK }}>{e.description}</div>
+              </div>
+              <button onClick={() => onDeleteEvent(e.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+        <button onClick={onAddEvent} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0 }}>+ Adicionar evento</button>
+      </SectionCard>
+
+      {item.caseType === "Consultoria" ? (
+        <SectionCard title="Tarefas do caso">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: MUTED }}>{doneCount} de {caseTasks.length} concluídas</span>
+          </div>
+          <div style={{ height: 6, background: "#F1EFE8", borderRadius: 4, overflow: "hidden", marginBottom: 12 }}>
+            <div style={{ width: `${progress}%`, height: "100%", background: "#B08D57" }} />
+          </div>
+          {caseTasks.map((t) => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+              <input type="checkbox" checked={t.done} onChange={() => onToggleTask(t.id)} style={{ width: 15, height: 15, accentColor: GOLD }} />
+              <div style={{ flex: 1, fontSize: 13, textDecoration: t.done ? "line-through" : "none", color: t.done ? MUTED : INK }}>
+                {t.title}{t.dueDate && <span style={{ fontSize: 11, color: MUTED, marginLeft: 8 }}>vence {fmtDate(t.dueDate)}</span>}
+              </div>
+              <button onClick={() => onDeleteTask(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+            </div>
+          ))}
+          <button onClick={onAddTask} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar tarefa</button>
+        </SectionCard>
+      ) : (
+        <SectionCard title="Prazos">
+          {caseTasks.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum prazo cadastrado.</p>}
+          {caseTasks.map((t) => {
+            const d = daysUntil(t.dueDate);
+            const overdue = d !== null && d < 0 && !t.done;
+            return (
+              <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <div>
+                  <div style={{ fontSize: 13, color: t.done ? MUTED : INK, textDecoration: t.done ? "line-through" : "none" }}>{t.title}</div>
+                  {t.dueDate && <div style={{ fontSize: 11, color: overdue ? "#993D1D" : MUTED }}>
+                    {t.done ? `concluído · ${fmtDate(t.dueDate)}` : overdue ? `vencido há ${Math.abs(d)} dia(s)` : d === 0 ? "vence hoje" : `vence em ${d} dia(s)`}
+                  </div>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input type="checkbox" checked={t.done} onChange={() => onToggleTask(t.id)} style={{ width: 15, height: 15, accentColor: GOLD }} />
+                  <button onClick={() => onDeleteTask(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            );
+          })}
+          <button onClick={onAddTask} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar prazo</button>
+        </SectionCard>
+      )}
+
+      {item.caseType === "Judicial" && (
+        <>
+          <SectionCard title="Anotações">
+            {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+            {caseNotes.map((n) => (
+              <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div>
+                  <div style={{ fontSize: 13, color: INK }}>{n.content}</div>
+                </div>
+                <button onClick={() => onDeleteNote(n.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+              </div>
+            ))}
+            <button onClick={onAddNote} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar anotação</button>
+          </SectionCard>
+
+          <SectionCard title="Banco de petições">
+            {caseDocs.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum documento referenciado ainda.</p>}
+            {caseDocs.map((d) => (
+              <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <div style={{ fontSize: 13, color: INK }}>{d.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {d.driveLink && <a href={d.driveLink} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: NAVY }}>Abrir no Drive ↗</a>}
+                  <button onClick={() => onDeleteDoc(d.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+            <button onClick={onAddDoc} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar documento</button>
+          </SectionCard>
+        </>
+      )}
     </>
   );
 }
@@ -515,8 +724,12 @@ export default function RSACApp() {
   const [tasks, setTasks] = useState([]);
   const [appts, setAppts] = useState([]);
   const [finance, setFinance] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [documents, setDocuments] = useState([]);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
+  const [folderCaseId, setFolderCaseId] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
   const [editingCase, setEditingCase] = useState(null);
   const [viewClient, setViewClient] = useState(null);
@@ -535,6 +748,7 @@ export default function RSACApp() {
     setLoading(true);
     loadAll().then(async (d) => {
       setClients(d.clients); setCases(d.cases); setTasks(d.tasks); setAppts(d.appts); setFinance(d.finance);
+      setEvents(d.events); setNotes(d.notes); setDocuments(d.documents);
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
       const r = profile?.role || "staff";
       setRole(r);
@@ -546,8 +760,8 @@ export default function RSACApp() {
     });
   }, [session]);
 
-  const setters = { clients: setClients, cases: setCases, tasks: setTasks, appts: setAppts, finance: setFinance };
-  const state = { clients, cases, tasks, appts, finance };
+  const setters = { clients: setClients, cases: setCases, tasks: setTasks, appts: setAppts, finance: setFinance, events: setEvents, notes: setNotes, documents: setDocuments };
+  const state = { clients, cases, tasks, appts, finance, events, notes, documents };
 
   const addRow = useCallback(async (key, row) => {
     const saved = await insertRow(key, row);
@@ -733,10 +947,20 @@ export default function RSACApp() {
         {tab === "cases" && (
           viewCase ? (
             <CaseFolder item={viewCase} client={clients.find((c) => c.id === viewCase.clientId)}
+              events={events} tasks={tasks} notes={notes} documents={documents}
               onBack={() => setViewCase(null)}
               onEdit={() => { setEditingCase(viewCase); setModal("case"); }}
               onDelete={() => removeCaseAndClose(viewCase.id)}
-              onOpenClient={(c) => { setViewCase(null); setTab("clients"); setViewClient(c); }} />
+              onOpenClient={(c) => { setViewCase(null); setTab("clients"); setViewClient(c); }}
+              onAddEvent={() => { setFolderCaseId(viewCase.id); setModal("event"); }}
+              onDeleteEvent={(id) => removeRow("events", id)}
+              onToggleTask={toggleTask}
+              onDeleteTask={(id) => removeRow("tasks", id)}
+              onAddTask={() => { setFolderCaseId(viewCase.id); setModal("task"); }}
+              onAddNote={() => { setFolderCaseId(viewCase.id); setModal("note"); }}
+              onDeleteNote={(id) => removeRow("notes", id)}
+              onAddDoc={() => { setFolderCaseId(viewCase.id); setModal("document"); }}
+              onDeleteDoc={(id) => removeRow("documents", id)} />
           ) : (
             <ListPage title="Casos" subtitle="Processos e casos em andamento." onAdd={() => { setEditingCase(null); setModal("case"); }}>
               {cases.map((c) => (
@@ -767,11 +991,21 @@ export default function RSACApp() {
         )}
 
         {tab === "calendar" && (
-          <ListPage title="Agenda" subtitle="Compromissos e audiências." onAdd={() => setModal("appt")}>
-            {[...appts].sort((a, b) => a.date.localeCompare(b.date)).map((a) => (
-              <RowCard key={a.id} onDelete={() => removeRow("appts", a.id)} title={a.title} subtitle={`${fmtDate(a.date)}${a.time ? " · " + a.time : ""}${a.location ? " · " + a.location : ""}`} />
-            ))}
-            {appts.length === 0 && <Empty text="Nenhum compromisso cadastrado. Adicione o primeiro." />}
+          <ListPage title="Agenda" subtitle="Compromissos e prazos de tarefas." onAdd={() => setModal("appt")}>
+            {(() => {
+              const apptItems = appts.map((a) => ({ kind: "Compromisso", date: a.date, id: a.id, title: a.title, extra: a.time ? a.time : "", location: a.location, done: false, raw: a }));
+              const taskItems = tasks.filter((t) => t.dueDate).map((t) => ({ kind: "Tarefa", date: t.dueDate, id: t.id, title: t.title, extra: "", location: "", done: t.done, raw: t }));
+              const merged = [...apptItems, ...taskItems].sort((a, b) => a.date.localeCompare(b.date));
+              if (merged.length === 0) return <Empty text="Nenhum compromisso ou prazo cadastrado." />;
+              return merged.map((it) => (
+                <RowCard key={`${it.kind}-${it.id}`}
+                  onDelete={() => removeRow(it.kind === "Tarefa" ? "tasks" : "appts", it.id)}
+                  title={it.title}
+                  subtitle={`${fmtDate(it.date)}${it.extra ? " · " + it.extra : ""}${it.location ? " · " + it.location : ""}${it.done ? " · concluída" : ""}`}
+                  right={<span style={{ fontSize: 10.5, background: it.kind === "Tarefa" ? "#F1EFE8" : "#EAF3DE", color: it.kind === "Tarefa" ? MUTED : "#27500A", padding: "2px 8px", borderRadius: 12 }}>{it.kind}</span>}
+                />
+              ));
+            })()}
           </ListPage>
         )}
 
@@ -803,15 +1037,19 @@ export default function RSACApp() {
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); }} clients={clients}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setFolderCaseId(null); }} clients={clients}
           editing={modal === "client" ? editingClient : modal === "case" ? editingCase : null}
+          taskCaseId={folderCaseId}
           onAddClient={(v) => { addRow("clients", v); setModal(null); }}
           onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
           onAddCase={(v) => { addRow("cases", v); setModal(null); }}
           onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
-          onAddTask={(v) => { addRow("tasks", v); setModal(null); }}
+          onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
           onAddAppt={(v) => { addRow("appts", v); setModal(null); }}
           onAddFinance={(v) => { addRow("finance", v); setModal(null); }}
+          onAddEvent={(v) => { addRow("events", v); setModal(null); setFolderCaseId(null); }}
+          onAddNote={(v) => { addRow("notes", v); setModal(null); setFolderCaseId(null); }}
+          onAddDoc={(v) => { addRow("documents", v); setModal(null); setFolderCaseId(null); }}
         />
       )}
     </div>
