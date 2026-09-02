@@ -26,7 +26,7 @@ const STATUS_COLORS = {
 };
 
 // camelCase (JS) <-> snake_case (Postgres)
-const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in });
+const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
@@ -66,7 +66,7 @@ async function loadAll() {
 }
 
 function toPayload(key, row) {
-  if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true };
+  if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
@@ -275,9 +275,23 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, onAddClient, 
     const [name, setName] = useState(editing?.name || ""); const [type, setType] = useState(editing?.type || "PF");
     const [email, setEmail] = useState(editing?.email || ""); const [phone, setPhone] = useState(editing?.phone || "");
     const [cpfCnpj, setCpfCnpj] = useState(editing?.cpfCnpj || ""); const [rg, setRg] = useState(editing?.rg || "");
+    const [contactType, setContactType] = useState(editing?.contactType || "Cliente");
+    const [address, setAddress] = useState(editing?.address || "");
     return (
-      <Modal title={editing ? "Editar cliente" : "Novo cliente"} onClose={onClose}>
+      <Modal title={editing ? "Editar contato" : "Novo contato"} onClose={onClose}>
         <Field label="Nome"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo ou razão social" /></Field>
+        <Field label="Tipo de contato">
+          <div style={{ display: "flex", gap: 8 }}>
+            {["Cliente", "Colaborador", "Parte contrária"].map((t) => (
+              <div key={t} onClick={() => setContactType(t)} style={{
+                flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 6, cursor: "pointer",
+                border: contactType === t ? "1.5px solid #B08D57" : "1px solid #E3E0D6",
+                background: contactType === t ? "rgba(176,141,87,0.1)" : "#fff",
+                fontSize: 12.5, color: contactType === t ? NAVY : MUTED,
+              }}>{t}</div>
+            ))}
+          </div>
+        </Field>
         <Field label="Tipo"><select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}><option value="PF">Pessoa física</option><option value="PJ">Pessoa jurídica</option></select></Field>
         <Field label={type === "PJ" ? "CNPJ" : "CPF"}>
           <input style={inputStyle} value={cpfCnpj} onChange={(e) => setCpfCnpj(e.target.value)} placeholder={type === "PJ" ? "00.000.000/0000-00" : "000.000.000-00"} />
@@ -287,10 +301,11 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, onAddClient, 
         )}
         <Field label="E-mail"><input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nome@exemplo.com" /></Field>
         <Field label="Telefone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(11) 90000-0000" /></Field>
+        <Field label="Endereço"><input style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Rua, número, bairro, cidade – UF" /></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!name.trim()) { setError("Informe o nome do cliente."); return; }
-          const values = { name: name.trim(), type, email, phone, cpfCnpj, rg: type === "PF" ? rg : "" };
+          const values = { name: name.trim(), type, email, phone, cpfCnpj, rg: type === "PF" ? rg : "", contactType, address };
           if (editing) onEditClient(editing.id, values); else onAddClient(values);
         }} />
       </Modal>
@@ -475,13 +490,17 @@ function ClientFolder({ client, cases, finance, onBack, onEdit, onDelete, onOpen
   return (
     <>
       <DetailHeader onBack={onBack} title={client.name}
-        badge={<span style={{ fontSize: 11, background: "#F1EFE8", color: MUTED, padding: "2px 9px", borderRadius: 12 }}>{client.type === "PJ" ? "Pessoa jurídica" : "Pessoa física"}</span>}
+        badge={<span style={{ display: "flex", gap: 6 }}>
+          <span style={{ fontSize: 11, background: "#F1EFE8", color: MUTED, padding: "2px 9px", borderRadius: 12 }}>{client.contactType || "Cliente"}</span>
+          <span style={{ fontSize: 11, background: "#F1EFE8", color: MUTED, padding: "2px 9px", borderRadius: 12 }}>{client.type === "PJ" ? "Pessoa jurídica" : "Pessoa física"}</span>
+        </span>}
         onEdit={onEdit} onDelete={onDelete} />
       <SectionCard title="Dados cadastrais">
         <InfoRow label={client.type === "PJ" ? "CNPJ" : "CPF"} value={client.cpfCnpj} />
         {client.type === "PF" && <InfoRow label="RG" value={client.rg} />}
         <InfoRow label="E-mail" value={client.email} />
         <InfoRow label="Telefone" value={client.phone} />
+        <InfoRow label="Endereço" value={client.address} />
       </SectionCard>
       <SectionCard title="Newsletter mensal">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -812,7 +831,7 @@ export default function RSACApp() {
 
   const NAV = [
     { id: "dashboard", label: "Painel", icon: LayoutDashboard },
-    { id: "clients", label: "Clientes", icon: Users },
+    { id: "clients", label: "Contatos", icon: Users },
     { id: "cases", label: "Casos", icon: Briefcase },
     { id: "tasks", label: "Tarefas", icon: CheckSquare },
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
@@ -880,7 +899,7 @@ export default function RSACApp() {
             <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Painel</h1>
             <p style={{ color: MUTED, fontSize: 13.5, margin: "0 0 20px" }}>Visão geral do escritório.</p>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 24 }}>
-              <StatCard icon={Users} label="Clientes" value={clients.length} />
+              <StatCard icon={Users} label="Contatos" value={clients.length} />
               <StatCard icon={Briefcase} label="Casos ativos" value={activeCases} />
               <StatCard icon={CheckSquare} label="Tarefas em aberto" value={openTasks} />
               <StatCard icon={CalendarIcon} label="Compromissos" value={appts.length} />
@@ -925,8 +944,8 @@ export default function RSACApp() {
               onOpenCase={(c) => { setViewClient(null); setTab("cases"); setViewCase(c); }}
               onToggleOptIn={() => toggleOptIn(viewClient)} />
           ) : (
-            <ListPage title="Clientes" subtitle="Pessoas físicas e jurídicas atendidas pelo escritório." onAdd={() => { setEditingClient(null); setModal("client"); }}>
-              <SearchBar value={search} onChange={setSearch} placeholder="Buscar cliente…" />
+            <ListPage title="Contatos" subtitle="Clientes, colaboradores e partes contrárias do escritório." onAdd={() => { setEditingClient(null); setModal("client"); }}>
+              <SearchBar value={search} onChange={setSearch} placeholder="Buscar contato…" />
               {clients.filter((c) => c.name.toLowerCase().includes(search.toLowerCase())).map((c) => {
                 const doc = c.cpfCnpj ? `${c.type === "PJ" ? "CNPJ" : "CPF"} ${c.cpfCnpj}` : null;
                 const rg = c.type === "PF" && c.rg ? `RG ${c.rg}` : null;
@@ -936,10 +955,11 @@ export default function RSACApp() {
                     onClick={() => setViewClient(c)}
                     onEdit={() => { setEditingClient(c); setModal("client"); }}
                     onDelete={() => removeRow("clients", c.id)}
-                    title={c.name} subtitle={subtitle} />
+                    title={c.name} subtitle={subtitle}
+                    right={<span style={{ fontSize: 10.5, background: "#F1EFE8", color: MUTED, padding: "2px 9px", borderRadius: 12 }}>{c.contactType || "Cliente"}</span>} />
                 );
               })}
-              {clients.length === 0 && <Empty text="Nenhum cliente cadastrado. Adicione o primeiro." />}
+              {clients.length === 0 && <Empty text="Nenhum contato cadastrado. Adicione o primeiro." />}
             </ListPage>
           )
         )}
