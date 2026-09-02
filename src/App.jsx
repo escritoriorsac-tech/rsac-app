@@ -1131,7 +1131,7 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
       });
       const data = await resp.json();
       if (resp.ok && data.sent) setTestMsg({ ok: true, text: `Teste enviado para ${testEmail.trim()}.` });
-      else setTestMsg({ ok: false, text: "Não foi possível enviar o teste. Confira a chave do Resend na função." });
+      else setTestMsg({ ok: false, text: `Falha no envio (status ${data.status}): ${data.resend_response || data.error || "sem detalhes"}` });
     } catch (e) {
       setTestMsg({ ok: false, text: "Falha de conexão ao enviar o teste." });
     }
