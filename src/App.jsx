@@ -1094,6 +1094,7 @@ export default function RSACApp() {
   const [editingCase, setEditingCase] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
   const [viewClient, setViewClient] = useState(null);
+  const [contactGroup, setContactGroup] = useState(null);
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
   const [newsletters, setNewsletters] = useState([]);
@@ -1158,7 +1159,7 @@ export default function RSACApp() {
   const removeClientAndClose = (id) => { removeRow("clients", id); setViewClient(null); };
   const removeCaseAndClose = (id) => { removeRow("cases", id); setViewCase(null); };
 
-  const goToTab = (id) => { setTab(id); setViewClient(null); setViewCase(null); };
+  const goToTab = (id) => { setTab(id); setViewClient(null); setViewCase(null); setContactGroup(null); setSearch(""); };
 
   const toggleTask = useCallback(async (id) => {
     const t = tasks.find((x) => x.id === id);
@@ -1296,7 +1297,7 @@ export default function RSACApp() {
               onDeletePrecedent={(id) => removeRow("precedents", id)} />
           ) : (
             <ListPage title="Contatos" subtitle="Clientes, colaboradores, partes contrárias e juízes do escritório." onAdd={() => { setEditingClient(null); setModal("client"); }}>
-              <SearchBar value={search} onChange={setSearch} placeholder="Buscar contato…" />
+              <SearchBar value={search} onChange={setSearch} placeholder="Buscar contato (em todos os grupos)…" />
               {(() => {
                 const q = search.trim().toLowerCase();
                 const filtered = clients.filter((c) => {
@@ -1307,27 +1308,56 @@ export default function RSACApp() {
                 });
                 const groups = ["Cliente", "Colaborador", "Parte contrária", "Juiz"];
                 const groupLabels = { "Cliente": "Clientes", "Colaborador": "Colaboradores", "Parte contrária": "Partes contrárias", "Juiz": "Juízes" };
-                return groups.map((g) => {
-                  const items = filtered.filter((c) => (c.contactType || "Cliente") === g);
-                  if (items.length === 0) return null;
+
+                const renderRow = (c) => {
+                  const doc = c.cpfCnpj ? `${c.type === "PJ" ? "CNPJ" : "CPF"} ${c.cpfCnpj}` : null;
+                  const rg = c.type === "PF" && c.rg ? `RG ${c.rg}` : null;
+                  const subtitle = [c.type === "PJ" ? "Pessoa jurídica" : "Pessoa física", doc, rg, c.email || null, c.phone || null].filter(Boolean).join(" · ");
                   return (
-                    <div key={g} style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 10.5, color: "#9A917E", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{groupLabels[g]} ({items.length})</div>
-                      {items.map((c) => {
-                        const doc = c.cpfCnpj ? `${c.type === "PJ" ? "CNPJ" : "CPF"} ${c.cpfCnpj}` : null;
-                        const rg = c.type === "PF" && c.rg ? `RG ${c.rg}` : null;
-                        const subtitle = [c.type === "PJ" ? "Pessoa jurídica" : "Pessoa física", doc, rg, c.email || null, c.phone || null].filter(Boolean).join(" · ");
-                        return (
-                          <RowCard key={c.id}
-                            onClick={() => setViewClient(c)}
-                            onEdit={() => { setEditingClient(c); setModal("client"); }}
-                            onDelete={() => removeRow("clients", c.id)}
-                            title={c.name} subtitle={subtitle} />
-                        );
-                      })}
-                    </div>
+                    <RowCard key={c.id}
+                      onClick={() => setViewClient(c)}
+                      onEdit={() => { setEditingClient(c); setModal("client"); }}
+                      onDelete={() => removeRow("clients", c.id)}
+                      title={c.name} subtitle={subtitle} />
                   );
-                });
+                };
+
+                // Buscando: mostra resultado universal, ignorando grupos
+                if (q) {
+                  if (filtered.length === 0) return <Empty text="Nenhum contato encontrado." />;
+                  return filtered.map(renderRow);
+                }
+
+                // Sem busca, dentro de um grupo: mostra a lista daquele grupo
+                if (contactGroup) {
+                  const items = clients.filter((c) => (c.contactType || "Cliente") === contactGroup);
+                  return (
+                    <>
+                      <button onClick={() => setContactGroup(null)} style={{ background: "none", border: "none", color: MUTED, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 12 }}>← Voltar aos grupos</button>
+                      <div style={{ fontSize: 10.5, color: "#9A917E", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{groupLabels[contactGroup]} ({items.length})</div>
+                      {items.length === 0 && <Empty text="Nenhum contato neste grupo ainda." />}
+                      {items.map(renderRow)}
+                    </>
+                  );
+                }
+
+                // Sem busca, sem grupo selecionado: mostra os grupos
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {groups.map((g) => {
+                      const count = clients.filter((c) => (c.contactType || "Cliente") === g).length;
+                      return (
+                        <div key={g} onClick={() => setContactGroup(g)} style={{
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          background: "#fff", border: "1px solid #EAE7DC", borderRadius: 10, padding: "16px 18px", cursor: "pointer",
+                        }}>
+                          <span style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY }}>{groupLabels[g]}</span>
+                          <span style={{ fontSize: 12.5, color: MUTED }}>{count} →</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
               })()}
               {clients.length === 0 && <Empty text="Nenhum contato cadastrado. Adicione o primeiro." />}
             </ListPage>
