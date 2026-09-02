@@ -1143,6 +1143,8 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
   const [highlightText, setHighlightText] = useState("");
   const [ctaText, setCtaText] = useState("");
   const [ctaLink, setCtaLink] = useState("");
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfFilename, setPdfFilename] = useState("");
 
   const submit = () => {
     if (!subject.trim() || !body.trim() || !scheduledFor) { setError("Preencha assunto, conteúdo e data de envio."); return; }
@@ -1150,9 +1152,9 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
     onSave({
       subject: subject.trim(), htmlBody: body.trim(), scheduledFor,
       bodyImageUrl: bodyImageUrl.trim(), highlightTitle: highlightTitle.trim(), highlightText: highlightText.trim(),
-      ctaText: ctaText.trim(), ctaLink: ctaLink.trim(),
+      ctaText: ctaText.trim(), ctaLink: ctaLink.trim(), pdfUrl: pdfUrl.trim(), pdfFilename: pdfFilename.trim(),
     });
-    setSubject(""); setBody(""); setBodyImageUrl(""); setHighlightTitle(""); setHighlightText(""); setCtaText(""); setCtaLink("");
+    setSubject(""); setBody(""); setBodyImageUrl(""); setHighlightTitle(""); setHighlightText(""); setCtaText(""); setCtaLink(""); setPdfUrl(""); setPdfFilename("");
   };
 
   return (
@@ -1178,6 +1180,8 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
         </Field>
         <Field label="Texto do botão (opcional)"><input style={inputStyle} value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder="Ex: Agendar uma conversa" /></Field>
         <Field label="Link do botão (opcional)"><input style={inputStyle} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} placeholder="https://wa.me/... ou mailto:..." /></Field>
+        <Field label="PDF anexo (opcional, link público do arquivo)"><input style={inputStyle} value={pdfUrl} onChange={(e) => setPdfUrl(e.target.value)} placeholder="https://.../informativo-rsac.pdf" /></Field>
+        <Field label="Nome do arquivo anexado"><input style={inputStyle} value={pdfFilename} onChange={(e) => setPdfFilename(e.target.value)} placeholder="Informativo-RSAC-Setembro-2026.pdf" /></Field>
         <Field label="Data de envio"><input type="date" style={inputStyle} value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} /></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -1386,6 +1390,8 @@ export default function RSACApp() {
       highlight_text: values.highlightText || null,
       cta_text: values.ctaText || null,
       cta_link: values.ctaLink || null,
+      pdf_url: values.pdfUrl || null,
+      pdf_filename: values.pdfFilename || null,
     }]).select();
     if (!error && data) setNewsletters((prev) => [data[0], ...prev]);
   };
