@@ -73,7 +73,7 @@ const STATUS_COLORS = {
 };
 
 // camelCase (JS) <-> snake_case (Postgres)
-const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address });
+const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
@@ -540,10 +540,20 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, onAddClient, 
   return null;
 }
 
-function LoginScreen() {
+function LoginScreen({ onClientPortalAccess }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
   const [error, setError] = useState(""); const [info, setInfo] = useState(""); const [busy, setBusy] = useState(false);
+
+  const [portalCode, setPortalCode] = useState(""); const [portalError, setPortalError] = useState(""); const [portalBusy, setPortalBusy] = useState(false);
+
+  const [publicNews, setPublicNews] = useState([]);
+
+  useEffect(() => {
+    supabase.from("newsletters").select("subject, html_body, scheduled_for")
+      .eq("sent", true).order("scheduled_for", { ascending: false }).limit(3)
+      .then(({ data }) => setPublicNews(data || []));
+  }, []);
 
   const submit = async () => {
     setError(""); setInfo("");
@@ -560,25 +570,81 @@ function LoginScreen() {
     setBusy(false);
   };
 
+  const submitPortal = async () => {
+    setPortalError("");
+    if (!portalCode.trim()) { setPortalError("Informe o código de acesso."); return; }
+    setPortalBusy(true);
+    try {
+      const resp = await fetch("https://jrcojsnjxuykdczbqfuo.supabase.co/functions/v1/client-portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_code: portalCode.trim() }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) { setPortalError(data.error || "Código de acesso inválido."); setPortalBusy(false); return; }
+      onClientPortalAccess(data);
+    } catch (e) {
+      setPortalError("Não foi possível conectar. Tente novamente.");
+    }
+    setPortalBusy(false);
+  };
+
   return (
-    <div style={{ minHeight: 560, background: NAVY, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, padding: 24 }}>
-      <div style={{ background: CREAM, borderRadius: 10, padding: "32px 30px", width: "100%", maxWidth: 360, boxSizing: "border-box" }}>
-        <div style={{ marginBottom: 26 }}><Logo dark={false} /></div>
-        <Field label="E-mail"><input style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@rsac.com.br" /></Field>
-        <Field label="Senha"><input style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" /></Field>
-        {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
-        {info && <div style={{ color: "#27500A", fontSize: 12.5, marginBottom: 10 }}>{info}</div>}
-        <button onClick={submit} disabled={busy} style={{ width: "100%", background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "10px 16px", fontSize: 14, cursor: "pointer", marginTop: 4 }}>
-          {busy ? "Aguarde…" : mode === "login" ? "Entrar" : "Criar conta"}
-        </button>
-        <div style={{ textAlign: "center", marginTop: 14, fontSize: 12.5, color: MUTED }}>
-          {mode === "login" ? (
-            <>Ainda não tem conta? <a href="#" onClick={(e) => { e.preventDefault(); setMode("signup"); setError(""); setInfo(""); }} style={{ color: NAVY }}>Criar acesso</a></>
-          ) : (
-            <>Já tem conta? <a href="#" onClick={(e) => { e.preventDefault(); setMode("login"); setError(""); setInfo(""); }} style={{ color: NAVY }}>Entrar</a></>
-          )}
+    <div style={{ background: NAVY, borderRadius: 10, padding: "28px 16px 20px" }}>
+      <div style={{ marginBottom: 24 }}><Logo dark size="big" /></div>
+
+      <div style={{ display: "flex", justifyContent: "center", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+        <div style={{ background: CREAM, borderRadius: 10, padding: "24px 22px", flex: "1 1 260px", maxWidth: 300, boxSizing: "border-box" }}>
+          <div style={{ fontSize: 11, color: MUTED, textTransform: "uppercase", letterSpacing: 1, textAlign: "center", marginBottom: 14 }}>Acesso da equipe</div>
+          <Field label="E-mail"><input style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@rsac.com.br" /></Field>
+          <Field label="Senha"><input style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" /></Field>
+          {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+          {info && <div style={{ color: "#27500A", fontSize: 12.5, marginBottom: 10 }}>{info}</div>}
+          <button onClick={submit} disabled={busy} style={{ width: "100%", background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "10px 16px", fontSize: 14, cursor: "pointer", marginTop: 4 }}>
+            {busy ? "Aguarde…" : mode === "login" ? "Entrar" : "Criar conta"}
+          </button>
+          <div style={{ textAlign: "center", marginTop: 14, fontSize: 12.5, color: MUTED }}>
+            {mode === "login" ? (
+              <>Ainda não tem conta? <a href="#" onClick={(e) => { e.preventDefault(); setMode("signup"); setError(""); setInfo(""); }} style={{ color: NAVY }}>Criar acesso</a></>
+            ) : (
+              <>Já tem conta? <a href="#" onClick={(e) => { e.preventDefault(); setMode("login"); setError(""); setInfo(""); }} style={{ color: NAVY }}>Entrar</a></>
+            )}
+          </div>
+        </div>
+
+        <div style={{ background: "#12233A", border: "1px solid #2A4560", borderRadius: 10, padding: "24px 22px", flex: "1 1 260px", maxWidth: 300, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <div style={{ fontFamily: "Georgia, serif", fontSize: 16, color: "#EDE6D8", textAlign: "center", marginBottom: 4 }}>Portal do cliente</div>
+          <div style={{ fontSize: 11, color: "#9FB0BE", textAlign: "center", marginBottom: 18 }}>Acompanhe seus casos e processos</div>
+          <Field label={<span style={{ color: "#B9C2CC" }}>Código de acesso</span>}>
+            <input style={inputStyle} value={portalCode} onChange={(e) => setPortalCode(e.target.value)} placeholder="Ex: a1b2c3d4" />
+          </Field>
+          {portalError && <div style={{ color: "#E39C8A", fontSize: 12.5, marginBottom: 10 }}>{portalError}</div>}
+          <button onClick={submitPortal} disabled={portalBusy} style={{ width: "100%", background: GOLD, color: "#0F2A43", border: "none", borderRadius: 6, padding: "10px 16px", fontSize: 14, cursor: "pointer", marginTop: 4, fontWeight: 600 }}>
+            {portalBusy ? "Verificando…" : "Acessar meus casos"}
+          </button>
         </div>
       </div>
+
+      {publicNews.length > 0 && (
+        <div style={{ background: CREAM, borderRadius: 10, padding: "18px 20px", maxWidth: 620, margin: "0 auto" }}>
+          <div style={{ fontSize: 11, letterSpacing: 1, color: MUTED, textTransform: "uppercase", borderBottom: "1px solid #EAE7DC", paddingBottom: 10, marginBottom: 10 }}>
+            Newsletter — últimas notícias
+          </div>
+          {publicNews.map((n, i) => {
+            const snippet = (n.html_body || "").split("\n").find((l) => l.trim()) || "";
+            return (
+              <div key={i} style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: i === publicNews.length - 1 ? "none" : "1px solid #F1EFE8" }}>
+                <div style={{ width: 4, background: GOLD, borderRadius: 2, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13, color: NAVY, fontWeight: 600 }}>{n.subject}</div>
+                  <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>{snippet.slice(0, 110)}{snippet.length > 110 ? "…" : ""}</div>
+                  <div style={{ fontSize: 10.5, color: "#9A917E", marginTop: 3 }}>{fmtDate(n.scheduled_for)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -605,6 +671,21 @@ function ClientFolder({ client, cases, finance, precedents, onBack, onEdit, onDe
         <InfoRow label="Telefone" value={client.phone} />
         <InfoRow label="Endereço" value={client.address} />
       </SectionCard>
+      {client.contactType === "Cliente" && (
+        <SectionCard title="Portal do cliente">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 11, color: MUTED, marginBottom: 3 }}>Código de acesso (compartilhe com o cliente)</div>
+              <div style={{ fontFamily: "monospace", fontSize: 15, color: NAVY, letterSpacing: 1 }}>{client.accessCode || "—"}</div>
+            </div>
+            {client.accessCode && (
+              <button onClick={() => navigator.clipboard?.writeText(client.accessCode)} style={{ background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", fontSize: 12, color: NAVY, cursor: "pointer" }}>
+                Copiar
+              </button>
+            )}
+          </div>
+        </SectionCard>
+      )}
       {client.contactType === "Cliente" && (
         <SectionCard title="Newsletter mensal">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1074,6 +1155,62 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
   );
 }
 
+function ClientPortalView({ data, onExit }) {
+  const [viewCaseId, setViewCaseId] = useState(null);
+  const { client, cases, events, documents } = data;
+  const viewingCase = cases.find((c) => c.id === viewCaseId);
+
+  return (
+    <div style={{ minHeight: 560, background: CREAM, borderRadius: 10, border: "1px solid #EAE7DC", padding: "28px 32px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 11, letterSpacing: 1.5, color: "#9A917E", textTransform: "uppercase" }}>Portal do cliente</div>
+          <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 22, margin: "4px 0 0" }}>Olá, {client.name.split(" ")[0]}</h1>
+        </div>
+        <button onClick={onExit} style={{ background: "none", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, color: MUTED, cursor: "pointer" }}>Sair</button>
+      </div>
+
+      {viewingCase ? (
+        <>
+          <button onClick={() => setViewCaseId(null)} style={{ background: "none", border: "none", color: MUTED, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>← Voltar aos meus casos</button>
+          <SectionCard title={viewingCase.title}>
+            <InfoRow label="Status" value={viewingCase.status} />
+            {viewingCase.number && <InfoRow label="Número" value={viewingCase.number} />}
+            {viewingCase.area && <InfoRow label="Área" value={viewingCase.area} />}
+            {viewingCase.tribunal && <InfoRow label="Tribunal" value={viewingCase.tribunal} />}
+            {viewingCase.comarca && <InfoRow label="Comarca" value={viewingCase.comarca} />}
+            {viewingCase.vara && <InfoRow label="Vara" value={viewingCase.vara} />}
+          </SectionCard>
+          <SectionCard title="Andamento">
+            <Timeline
+              events={events.filter((e) => e.caseId === viewingCase.id || e.case_id === viewingCase.id).map((e) => ({ id: e.id, date: e.event_date || e.date, description: e.description }))}
+              onDelete={() => {}}
+            />
+          </SectionCard>
+          <SectionCard title="Documentos">
+            {documents.filter((d) => (d.caseId || d.case_id) === viewingCase.id).length === 0 && (
+              <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum documento disponibilizado ainda.</p>
+            )}
+            {documents.filter((d) => (d.caseId || d.case_id) === viewingCase.id).map((d) => (
+              <div key={d.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <span style={{ fontSize: 13, color: INK }}>{d.name}</span>
+                {(d.driveLink || d.drive_link) && <a href={d.driveLink || d.drive_link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: NAVY }}>Abrir ↗</a>}
+              </div>
+            ))}
+          </SectionCard>
+        </>
+      ) : (
+        <SectionCard title={`Seus casos (${cases.length})`}>
+          {cases.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum caso vinculado no momento.</p>}
+          {cases.map((c) => (
+            <RowCard key={c.id} onClick={() => setViewCaseId(c.id)} title={c.title} subtitle={`${c.number || "sem número"}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
+          ))}
+        </SectionCard>
+      )}
+    </div>
+  );
+}
+
 export default function RSACApp() {
   const [session, setSession] = useState(undefined);
   const [loading, setLoading] = useState(true);
@@ -1098,6 +1235,7 @@ export default function RSACApp() {
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
   const [newsletters, setNewsletters] = useState([]);
+  const [portalData, setPortalData] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -1209,10 +1347,14 @@ export default function RSACApp() {
     }
   };
 
+  if (portalData) {
+    return <ClientPortalView data={portalData} onExit={() => setPortalData(null)} />;
+  }
+
   if (session === undefined) {
     return <div style={{ padding: 40, textAlign: "center", color: MUTED, fontFamily: "Georgia, serif" }}>Carregando…</div>;
   }
-  if (!session) return <LoginScreen />;
+  if (!session) return <LoginScreen onClientPortalAccess={setPortalData} />;
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: MUTED, fontFamily: "Georgia, serif" }}>Carregando RSAC…</div>;
 
   return (
