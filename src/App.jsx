@@ -1114,13 +1114,45 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
   const [body, setBody] = useState("");
   const [scheduledFor, setScheduledFor] = useState(todayISO());
   const [error, setError] = useState("");
+  const [testEmail, setTestEmail] = useState("");
+  const [testBusy, setTestBusy] = useState(null);
+  const [testMsg, setTestMsg] = useState(null);
   const optedInCount = clients.filter((c) => c.newsletterOptIn !== false && c.email).length;
+
+  const sendTest = async (newsletterId) => {
+    setTestMsg(null);
+    if (!testEmail.trim()) { setTestMsg({ ok: false, text: "Informe um e-mail para o teste." }); return; }
+    setTestBusy(newsletterId);
+    try {
+      const resp = await fetch("https://jrcojsnjxuykdczbqfuo.supabase.co/functions/v1/send-newsletter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ test_email: testEmail.trim(), newsletter_id: newsletterId }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.sent) setTestMsg({ ok: true, text: `Teste enviado para ${testEmail.trim()}.` });
+      else setTestMsg({ ok: false, text: "Não foi possível enviar o teste. Confira a chave do Resend na função." });
+    } catch (e) {
+      setTestMsg({ ok: false, text: "Falha de conexão ao enviar o teste." });
+    }
+    setTestBusy(null);
+  };
+
+  const [bodyImageUrl, setBodyImageUrl] = useState("");
+  const [highlightTitle, setHighlightTitle] = useState("");
+  const [highlightText, setHighlightText] = useState("");
+  const [ctaText, setCtaText] = useState("");
+  const [ctaLink, setCtaLink] = useState("");
 
   const submit = () => {
     if (!subject.trim() || !body.trim() || !scheduledFor) { setError("Preencha assunto, conteúdo e data de envio."); return; }
     setError("");
-    onSave({ subject: subject.trim(), htmlBody: body.trim(), scheduledFor });
-    setSubject(""); setBody("");
+    onSave({
+      subject: subject.trim(), htmlBody: body.trim(), scheduledFor,
+      bodyImageUrl: bodyImageUrl.trim(), highlightTitle: highlightTitle.trim(), highlightText: highlightText.trim(),
+      ctaText: ctaText.trim(), ctaLink: ctaLink.trim(),
+    });
+    setSubject(""); setBody(""); setBodyImageUrl(""); setHighlightTitle(""); setHighlightText(""); setCtaText(""); setCtaLink("");
   };
 
   return (
@@ -1136,6 +1168,16 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
           <textarea style={{ ...inputStyle, minHeight: 160, resize: "vertical", fontFamily: "inherit" }}
             value={body} onChange={(e) => setBody(e.target.value)} placeholder="Escreva o conteúdo da newsletter deste mês…" />
         </Field>
+        <Field label="Imagem no corpo do e-mail (opcional, link público da imagem)">
+          <input style={inputStyle} value={bodyImageUrl} onChange={(e) => setBodyImageUrl(e.target.value)} placeholder="https://.../imagem.jpg" />
+        </Field>
+        <Field label="Título da caixa de destaque (opcional)"><input style={inputStyle} value={highlightTitle} onChange={(e) => setHighlightTitle(e.target.value)} placeholder="Ex: Prazo para agir" /></Field>
+        <Field label="Texto da caixa de destaque (opcional)">
+          <textarea style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "inherit" }}
+            value={highlightText} onChange={(e) => setHighlightText(e.target.value)} placeholder="Texto curto que aparece destacado…" />
+        </Field>
+        <Field label="Texto do botão (opcional)"><input style={inputStyle} value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder="Ex: Agendar uma conversa" /></Field>
+        <Field label="Link do botão (opcional)"><input style={inputStyle} value={ctaLink} onChange={(e) => setCtaLink(e.target.value)} placeholder="https://wa.me/... ou mailto:..." /></Field>
         <Field label="Data de envio"><input type="date" style={inputStyle} value={scheduledFor} onChange={(e) => setScheduledFor(e.target.value)} /></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -1144,10 +1186,19 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
       </SectionCard>
 
       <SectionCard title={`Edições (${newsletters.length})`}>
+        <Field label="E-mail para teste"><input style={inputStyle} value={testEmail} onChange={(e) => setTestEmail(e.target.value)} placeholder="seuemail@gmail.com" /></Field>
+        {testMsg && <div style={{ fontSize: 12, color: testMsg.ok ? "#27500A" : "#993D1D", marginBottom: 10 }}>{testMsg.text}</div>}
         {newsletters.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma newsletter agendada ainda.</p>}
         {newsletters.map((n) => (
           <RowCard key={n.id} title={n.subject} subtitle={`Envio em ${fmtDate(n.scheduled_for)}${n.sent ? " · enviada" : " · agendada"}`}
-            right={<Badge text={n.sent ? "Encerrado" : "Ativo"} />}
+            right={
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button onClick={() => sendTest(n.id)} disabled={testBusy === n.id} style={{ background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "5px 10px", fontSize: 11.5, color: NAVY, cursor: "pointer" }}>
+                  {testBusy === n.id ? "Enviando…" : "Enviar teste"}
+                </button>
+                <Badge text={n.sent ? "Encerrado" : "Ativo"} />
+              </div>
+            }
             onDelete={n.sent ? undefined : () => onDelete(n.id)} />
         ))}
       </SectionCard>
@@ -1330,6 +1381,11 @@ export default function RSACApp() {
   const saveNewsletter = async (values) => {
     const { data, error } = await supabase.from("newsletters").insert([{
       subject: values.subject, html_body: values.htmlBody, scheduled_for: values.scheduledFor,
+      body_image_url: values.bodyImageUrl || null,
+      highlight_title: values.highlightTitle || null,
+      highlight_text: values.highlightText || null,
+      cta_text: values.ctaText || null,
+      cta_link: values.ctaLink || null,
     }]).select();
     if (!error && data) setNewsletters((prev) => [data[0], ...prev]);
   };
