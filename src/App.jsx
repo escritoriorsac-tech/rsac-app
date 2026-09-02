@@ -946,7 +946,13 @@ export default function RSACApp() {
           ) : (
             <ListPage title="Contatos" subtitle="Clientes, colaboradores e partes contrárias do escritório." onAdd={() => { setEditingClient(null); setModal("client"); }}>
               <SearchBar value={search} onChange={setSearch} placeholder="Buscar contato…" />
-              {clients.filter((c) => c.name.toLowerCase().includes(search.toLowerCase())).map((c) => {
+              {clients.filter((c) => {
+                const q = search.trim().toLowerCase();
+                if (!q) return true;
+                return [c.name, c.email, c.phone, c.cpfCnpj, c.address, c.contactType]
+                  .filter(Boolean)
+                  .some((field) => field.toLowerCase().includes(q));
+              }).map((c) => {
                 const doc = c.cpfCnpj ? `${c.type === "PJ" ? "CNPJ" : "CPF"} ${c.cpfCnpj}` : null;
                 const rg = c.type === "PF" && c.rg ? `RG ${c.rg}` : null;
                 const subtitle = [c.type === "PJ" ? "Pessoa jurídica" : "Pessoa física", doc, rg, c.email || null, c.phone || null].filter(Boolean).join(" · ");
