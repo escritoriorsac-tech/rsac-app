@@ -77,7 +77,7 @@ const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email,
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
-const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id });
+const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
 const toNote = (r) => ({ id: r.id, caseId: r.case_id, date: r.note_date, content: r.content });
 const toDoc = (r) => ({ id: r.id, caseId: r.case_id, name: r.name, driveLink: r.drive_link });
@@ -121,7 +121,7 @@ function toPayload(key, row) {
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
-  if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null };
+  if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
   if (key === "notes") return { case_id: row.caseId, note_date: row.date || todayISO(), content: row.content };
   if (key === "precedents") return { judge_id: row.judgeId, description: row.description, drive_link: row.driveLink || null };
@@ -339,7 +339,7 @@ function SubmitRow({ onClose, onSubmit }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, editing, taskCaseId, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddAppt, onAddFinance, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddAppt, onAddFinance, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -472,17 +472,17 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, onAddClient, 
 
   if (modal === "finance") {
     const [description, setDescription] = useState(""); const [amount, setAmount] = useState("");
-    const [type, setType] = useState("Receita"); const [date, setDate] = useState(todayISO());
-    const [clientId, setClientId] = useState("");
+    const [type, setType] = useState(financeContext?.presetType || "Receita"); const [date, setDate] = useState(todayISO());
+    const [clientId, setClientId] = useState(financeContext?.clientId || "");
     return (
-      <Modal title="Novo lançamento" onClose={onClose}>
+      <Modal title={financeContext?.presetType === "Despesa" ? "Nova despesa processual" : financeContext?.presetType === "Receita" ? "Novo pagamento do cliente" : "Novo lançamento"} onClose={onClose}>
         <Field label="Descrição"><input style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Honorário — caso X" /></Field>
         <Field label="Tipo"><select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}><option>Receita</option><option>Despesa</option></select></Field>
         <Field label="Valor (R$)"><input type="number" step="0.01" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" /></Field>
         <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Cliente (opcional)"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
-        <SubmitRow onClose={onClose} onSubmit={() => { if (!description.trim() || !amount) { setError("Informe descrição e valor."); return; } onAddFinance({ description: description.trim(), amount: Number(amount), type, date, clientId }); }} />
+        <SubmitRow onClose={onClose} onSubmit={() => { if (!description.trim() || !amount) { setError("Informe descrição e valor."); return; } onAddFinance({ description: description.trim(), amount: Number(amount), type, date, clientId, caseId: financeContext?.caseId || null }); }} />
       </Modal>
     );
   }
@@ -824,16 +824,19 @@ function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo }) {
   );
 }
 function CaseFolder({
-  item, client, clients, events, tasks, notes, documents, precedents,
+  item, client, clients, events, tasks, notes, documents, precedents, finance,
   onBack, onEdit, onDelete, onOpenClient, onOpenJudge,
   onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask, onEditTask,
-  onAddNote, onDeleteNote, onAddDoc, onDeleteDoc,
+  onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
 }) {
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
   const caseTasks = tasks.filter((t) => t.caseId === item.id);
   const caseNotes = notes.filter((n) => n.caseId === item.id);
   const caseDocs = documents.filter((d) => d.caseId === item.id);
+  const caseFinance = (finance || []).filter((f) => f.caseId === item.id);
+  const caseExpenses = caseFinance.filter((f) => f.type === "Despesa");
+  const casePayments = caseFinance.filter((f) => f.type === "Receita");
   const doneCount = caseTasks.filter((t) => t.done).length;
   const progress = caseTasks.length ? Math.round((doneCount / caseTasks.length) * 100) : 0;
 
@@ -955,6 +958,24 @@ function CaseFolder({
           </SectionCard>
         </>
       )}
+
+      <SectionCard title="Despesas processuais">
+        {caseExpenses.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma despesa registrada ainda.</p>}
+        {caseExpenses.map((f) => (
+          <RowCard key={f.id} title={f.description} subtitle={fmtDate(f.date)} onDelete={() => onDeleteFinance(f.id)}
+            right={<span style={{ color: "#993D1D", fontSize: 13.5, fontWeight: 500 }}>-{fmtBRL(f.amount)}</span>} />
+        ))}
+        <button onClick={onAddExpense} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar despesa processual</button>
+      </SectionCard>
+
+      <SectionCard title="Pagamentos do cliente">
+        {casePayments.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum pagamento registrado ainda.</p>}
+        {casePayments.map((f) => (
+          <RowCard key={f.id} title={f.description} subtitle={fmtDate(f.date)} onDelete={() => onDeleteFinance(f.id)}
+            right={<span style={{ color: "#27500A", fontSize: 13.5, fontWeight: 500 }}>+{fmtBRL(f.amount)}</span>} />
+        ))}
+        <button onClick={onAddPayment} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar pagamento do cliente</button>
+      </SectionCard>
     </>
   );
 }
@@ -1282,6 +1303,7 @@ export default function RSACApp() {
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
   const [folderCaseId, setFolderCaseId] = useState(null);
+  const [financeContext, setFinanceContext] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
   const [editingCase, setEditingCase] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
@@ -1571,7 +1593,7 @@ export default function RSACApp() {
         {tab === "cases" && (
           viewCase ? (
             <CaseFolder item={viewCase} client={clients.find((c) => c.id === viewCase.clientId)} clients={clients}
-              events={events} tasks={tasks} notes={notes} documents={documents} precedents={precedents}
+              events={events} tasks={tasks} notes={notes} documents={documents} precedents={precedents} finance={finance}
               onBack={() => setViewCase(null)}
               onEdit={() => { setEditingCase(viewCase); setModal("case"); }}
               onDelete={() => removeCaseAndClose(viewCase.id)}
@@ -1586,7 +1608,10 @@ export default function RSACApp() {
               onAddNote={() => { setFolderCaseId(viewCase.id); setModal("note"); }}
               onDeleteNote={(id) => removeRow("notes", id)}
               onAddDoc={() => { setFolderCaseId(viewCase.id); setModal("document"); }}
-              onDeleteDoc={(id) => removeRow("documents", id)} />
+              onDeleteDoc={(id) => removeRow("documents", id)}
+              onAddExpense={() => { setFinanceContext({ caseId: viewCase.id, clientId: viewCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
+              onAddPayment={() => { setFinanceContext({ caseId: viewCase.id, clientId: viewCase.clientId, presetType: "Receita" }); setModal("finance"); }}
+              onDeleteFinance={(id) => removeRow("finance", id)} />
           ) : (
             <ListPage title="Casos" subtitle="Processos e casos em andamento." onAdd={() => { setEditingCase(null); setModal("case"); }}>
               {cases.map((c) => (
@@ -1680,9 +1705,10 @@ export default function RSACApp() {
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setFolderCaseId(null); }} clients={clients}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients}
           editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : null}
           taskCaseId={folderCaseId}
+          financeContext={financeContext}
           onAddClient={(v) => { addRow("clients", v); setModal(null); }}
           onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
           onAddCase={(v) => { addRow("cases", v); setModal(null); }}
@@ -1690,7 +1716,7 @@ export default function RSACApp() {
           onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
           onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
           onAddAppt={(v) => { addRow("appts", v); setModal(null); }}
-          onAddFinance={(v) => { addRow("finance", v); setModal(null); }}
+          onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
           onAddEvent={(v) => { addRow("events", v); setModal(null); setFolderCaseId(null); }}
           onAddNote={(v) => { addRow("notes", v); setModal(null); setFolderCaseId(null); }}
           onAddDoc={(v) => { addRow("documents", v); setModal(null); setFolderCaseId(null); }}
