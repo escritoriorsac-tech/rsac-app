@@ -74,10 +74,10 @@ const STATUS_COLORS = {
 
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code });
-const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id });
-const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at });
+const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link });
+const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
-const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id });
+const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
 const toNote = (r) => ({ id: r.id, caseId: r.case_id, date: r.note_date, content: r.content });
 const toDoc = (r) => ({ id: r.id, caseId: r.case_id, name: r.name, driveLink: r.drive_link });
@@ -92,7 +92,7 @@ const TABLE_BY_KEY = {
 const MAPPER_BY_KEY = { clients: toClient, cases: toCase, tasks: toTask, appts: toAppt, finance: toFinance, events: toEvent, notes: toNote, documents: toDoc, precedents: toPrecedent };
 
 async function loadAll() {
-  const [c, cs, t, a, f, ev, no, doc, pr] = await Promise.all([
+  const [c, cs, t, a, f, ev, no, doc, pr, fs] = await Promise.all([
     supabase.from("clients").select("*").order("created_at"),
     supabase.from("cases").select("*").order("created_at"),
     supabase.from("tasks").select("*").order("created_at"),
@@ -102,6 +102,7 @@ async function loadAll() {
     supabase.from("case_notes").select("*").order("note_date", { ascending: false }),
     supabase.from("case_documents").select("*").order("created_at"),
     supabase.from("judge_precedents").select("*").order("created_at"),
+    supabase.from("finance_settings").select("*").eq("id", 1).maybeSingle(),
   ]);
   return {
     clients: (c.data || []).map(toClient),
@@ -113,15 +114,16 @@ async function loadAll() {
     notes: (no.data || []).map(toNote),
     documents: (doc.data || []).map(toDoc),
     precedents: (pr.data || []).map(toPrecedent),
+    monthlyGoal: fs.data?.monthly_goal || 0,
   };
 }
 
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null };
-  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null };
+  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
-  if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null };
+  if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: row.paid !== undefined ? row.paid : true, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
   if (key === "notes") return { case_id: row.caseId, note_date: row.date || todayISO(), content: row.content };
   if (key === "precedents") return { judge_id: row.judgeId, description: row.description, drive_link: row.driveLink || null };
@@ -339,7 +341,7 @@ function SubmitRow({ onClose, onSubmit }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddAppt, onAddFinance, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -390,6 +392,7 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContex
     const [tribunal, setTribunal] = useState(editing?.tribunal || ""); const [comarca, setComarca] = useState(editing?.comarca || "");
     const [instancia, setInstancia] = useState(editing?.instancia || ""); const [vara, setVara] = useState(editing?.vara || "");
     const [tribunalLink, setTribunalLink] = useState(editing?.tribunalLink || "");
+    const [balcaoVirtualLink, setBalcaoVirtualLink] = useState(editing?.balcaoVirtualLink || "");
     const [judgeId, setJudgeId] = useState(editing?.judgeId || "");
     const judges = clients.filter((c) => c.contactType === "Juiz");
     return (
@@ -422,6 +425,7 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContex
               {judges.length === 0 && <div style={{ fontSize: 11, color: MUTED, marginTop: 4 }}>Nenhum contato do tipo Juiz cadastrado ainda. Crie um em Contatos.</div>}
             </Field>
             <Field label="Link de consulta processual (opcional)"><input style={inputStyle} value={tribunalLink} onChange={(e) => setTribunalLink(e.target.value)} placeholder="https://..." /></Field>
+            <Field label="Balcão virtual da vara (opcional)"><input style={inputStyle} value={balcaoVirtualLink} onChange={(e) => setBalcaoVirtualLink(e.target.value)} placeholder="https://..." /></Field>
           </>
         )}
         <Field label="Número do processo (opcional)"><input style={inputStyle} value={number} onChange={(e) => setNumber(e.target.value)} /></Field>
@@ -430,7 +434,7 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContex
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Informe o título do caso."); return; }
-          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId };
+          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId, balcaoVirtualLink };
           if (editing) onEditCase(editing.id, values); else onAddCase(values);
         }} />
       </Modal>
@@ -471,18 +475,46 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContex
   }
 
   if (modal === "finance") {
-    const [description, setDescription] = useState(""); const [amount, setAmount] = useState("");
-    const [type, setType] = useState(financeContext?.presetType || "Receita"); const [date, setDate] = useState(todayISO());
-    const [clientId, setClientId] = useState(financeContext?.clientId || "");
+    const [description, setDescription] = useState(editing?.description || ""); const [amount, setAmount] = useState(editing?.amount || "");
+    const [type, setType] = useState(editing?.type || financeContext?.presetType || "Receita"); const [date, setDate] = useState(editing?.date || todayISO());
+    const [clientId, setClientId] = useState(editing?.clientId || financeContext?.clientId || "");
+    const [bankAccount, setBankAccount] = useState(editing?.bankAccount || "");
+    const [paid, setPaid] = useState(editing ? editing.paid !== false : true);
+    const [recurrent, setRecurrent] = useState(false);
+    const [months, setMonths] = useState(2);
     return (
-      <Modal title={financeContext?.presetType === "Despesa" ? "Nova despesa processual" : financeContext?.presetType === "Receita" ? "Novo pagamento do cliente" : "Novo lançamento"} onClose={onClose}>
+      <Modal title={editing ? "Editar lançamento" : financeContext?.presetType === "Despesa" ? "Nova despesa processual" : financeContext?.presetType === "Receita" ? "Novo pagamento do cliente" : "Novo lançamento"} onClose={onClose}>
         <Field label="Descrição"><input style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Honorário — caso X" /></Field>
         <Field label="Tipo"><select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}><option>Receita</option><option>Despesa</option></select></Field>
         <Field label="Valor (R$)"><input type="number" step="0.01" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" /></Field>
         <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Conta bancária (opcional)"><input style={inputStyle} value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Ex: Banco do Brasil — CC 12345-6" /></Field>
         <Field label="Cliente (opcional)"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 13, color: INK }}>
+          <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD }} />
+          {type === "Despesa" ? "Já foi pago" : "Já foi recebido"}
+        </label>
+        {!editing && (
+          <>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 13, color: INK }}>
+              <input type="checkbox" checked={recurrent} onChange={(e) => setRecurrent(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD }} />
+              Recorrente
+            </label>
+            {recurrent && (
+              <Field label="Repetir por quantos meses (incluindo este)">
+                <input type="number" min="2" style={inputStyle} value={months} onChange={(e) => setMonths(e.target.value)} />
+              </Field>
+            )}
+          </>
+        )}
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
-        <SubmitRow onClose={onClose} onSubmit={() => { if (!description.trim() || !amount) { setError("Informe descrição e valor."); return; } onAddFinance({ description: description.trim(), amount: Number(amount), type, date, clientId, caseId: financeContext?.caseId || null }); }} />
+        <SubmitRow onClose={onClose} onSubmit={() => {
+          if (!description.trim() || !amount) { setError("Informe descrição e valor."); return; }
+          const base = { description: description.trim(), amount: Number(amount), type, date, clientId, bankAccount, paid, caseId: financeContext?.caseId || (editing ? editing.caseId : null) };
+          if (editing) { onEditFinance(editing.id, base); return; }
+          if (recurrent && Number(months) > 1) onAddFinanceRecurring(base, Number(months));
+          else onAddFinance(base);
+        }} />
       </Modal>
     );
   }
@@ -798,7 +830,10 @@ function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <input type="checkbox" checked={t.done} onChange={() => onToggle(t.id)} style={{ width: 15, height: 15, accentColor: GOLD, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, textDecoration: t.done ? "line-through" : "none", color: t.done ? MUTED : INK }}>{t.title}</div>
+          <div style={{ fontSize: 13, textDecoration: t.done ? "line-through" : "none", color: t.done ? MUTED : INK }}>
+            {t.title}
+            {t.isStallAlert && <span style={{ fontSize: 9.5, background: "#FBE3DC", color: "#993D1D", padding: "1px 7px", borderRadius: 10, marginLeft: 8 }}>Automático</span>}
+          </div>
           {showDueInfo && t.dueDate && (
             <div style={{ fontSize: 11, color: overdue ? "#993D1D" : MUTED }}>
               {t.done ? `concluída · ${fmtDate(t.dueDate)}` : overdue ? `vencido há ${Math.abs(d)} dia(s)` : d === 0 ? "vence hoje" : `vence em ${d} dia(s)`}
@@ -876,6 +911,15 @@ function CaseFolder({
             </>
           ) : (
             <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum juiz vinculado. Edite o caso para selecionar um contato do tipo Juiz.</p>
+          )}
+          {item.balcaoVirtualLink ? (
+            <div style={{ marginTop: 10 }}>
+              <a href={item.balcaoVirtualLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", textDecoration: "none" }}>
+                Balcão virtual ↗
+              </a>
+            </div>
+          ) : (
+            <p style={{ fontSize: 11.5, color: MUTED, margin: "10px 0 0" }}>Nenhum link de balcão virtual cadastrado. Edite o caso para adicionar.</p>
           )}
         </SectionCard>
       )}
@@ -1130,6 +1174,81 @@ function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt }) {
     </>
   );
 }
+function MonthlyChart({ finance, monthlyGoal }) {
+  const now = new Date();
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: d.toLocaleDateString("pt-BR", { month: "short" }) };
+  });
+  const byMonth = months.map((m) => {
+    const items = finance.filter((f) => f.date && f.date.startsWith(m.key));
+    const receita = items.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount || 0), 0);
+    const despesa = items.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount || 0), 0);
+    return { ...m, receita, despesa, saldo: receita - despesa };
+  });
+  const maxVal = Math.max(monthlyGoal, ...byMonth.map((m) => Math.max(m.saldo, 0)), 1);
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 160, padding: "10px 6px 0" }}>
+      {byMonth.map((m) => {
+        const h = Math.max(4, Math.round((Math.max(m.saldo, 0) / maxVal) * 130));
+        const hitGoal = m.saldo >= monthlyGoal && monthlyGoal > 0;
+        return (
+          <div key={m.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{ fontSize: 10, color: MUTED, marginBottom: 4 }}>{fmtBRL(m.saldo)}</div>
+            <div style={{
+              width: "100%", maxWidth: 36, height: h, borderRadius: "4px 4px 0 0",
+              background: m.saldo < 0 ? "#C0997B" : hitGoal ? "#27500A" : GOLD,
+            }} />
+            <div style={{ fontSize: 10.5, color: MUTED, marginTop: 6, textTransform: "capitalize" }}>{m.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FinanceTab({
+  finance, clients, monthlyGoal, onSaveGoal, onAdd, onEdit, onDelete, clientName,
+}) {
+  const [goalInput, setGoalInput] = useState(monthlyGoal || "");
+  const receitas = finance.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount || 0), 0);
+  const despesas = finance.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount || 0), 0);
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
+        <div>
+          <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Financeiro</h1>
+          <p style={{ color: MUTED, fontSize: 13.5, margin: 0 }}>Honorários e despesas do escritório.</p>
+        </div>
+        <AddButton onClick={onAdd} />
+      </div>
+      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+        <StatCard icon={Wallet} label="Receitas" value={fmtBRL(receitas)} />
+        <StatCard icon={Wallet} label="Despesas" value={fmtBRL(despesas)} />
+        <StatCard icon={Wallet} label="Saldo" value={fmtBRL(receitas - despesas)} />
+      </div>
+
+      <SectionCard title="Desempenho mensal">
+        <MonthlyChart finance={finance} monthlyGoal={Number(monthlyGoal) || 0} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, paddingTop: 14, borderTop: "1px solid #F1EFE8" }}>
+          <span style={{ fontSize: 12.5, color: MUTED }}>Meta mensal (saldo)</span>
+          <input type="number" step="100" style={{ ...inputStyle, maxWidth: 160 }} value={goalInput} onChange={(e) => setGoalInput(e.target.value)} placeholder="Ex: 50000" />
+          <button onClick={() => onSaveGoal(Number(goalInput) || 0)} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 12.5, cursor: "pointer" }}>Salvar meta</button>
+        </div>
+      </SectionCard>
+
+      {finance.slice().reverse().map((f) => (
+        <RowCard key={f.id} onEdit={() => onEdit(f)} onDelete={() => onDelete(f.id)} title={f.description}
+          subtitle={`${fmtDate(f.date)}${f.clientId ? " · " + clientName(f.clientId) : ""}${f.bankAccount ? " · " + f.bankAccount : ""}${!f.paid ? (f.type === "Despesa" ? " · a pagar" : " · a receber") : ""}`}
+          right={<span style={{ color: f.type === "Receita" ? "#27500A" : "#993D1D", fontSize: 14, fontWeight: 500 }}>{f.type === "Receita" ? "+" : "-"}{fmtBRL(f.amount)}</span>} />
+      ))}
+      {finance.length === 0 && <Empty text="Nenhum lançamento cadastrado." />}
+    </>
+  );
+}
+
 function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -1300,6 +1419,7 @@ export default function RSACApp() {
   const [notes, setNotes] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [precedents, setPrecedents] = useState([]);
+  const [monthlyGoal, setMonthlyGoal] = useState(0);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
   const [folderCaseId, setFolderCaseId] = useState(null);
@@ -1307,8 +1427,10 @@ export default function RSACApp() {
   const [editingClient, setEditingClient] = useState(null);
   const [editingCase, setEditingCase] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
+  const [editingFinance, setEditingFinance] = useState(null);
   const [viewClient, setViewClient] = useState(null);
   const [contactGroup, setContactGroup] = useState(null);
+  const [expandedCaseClient, setExpandedCaseClient] = useState(null);
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
   const [newsletters, setNewsletters] = useState([]);
@@ -1326,6 +1448,7 @@ export default function RSACApp() {
     loadAll().then(async (d) => {
       setClients(d.clients); setCases(d.cases); setTasks(d.tasks); setAppts(d.appts); setFinance(d.finance);
       setEvents(d.events); setNotes(d.notes); setDocuments(d.documents); setPrecedents(d.precedents);
+      setMonthlyGoal(d.monthlyGoal || 0);
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
       const r = profile?.role || "staff";
       setRole(r);
@@ -1369,6 +1492,23 @@ export default function RSACApp() {
   const editTaskRow = useCallback(async (id, values) => {
     const updated = await editRow("tasks", id, values);
     if (updated) setTasks((prev) => prev.map((t) => t.id === id ? updated : t));
+  }, []);
+
+  const editFinanceRow = useCallback(async (id, values) => {
+    const updated = await editRow("finance", id, values);
+    if (updated) setFinance((prev) => prev.map((f) => f.id === id ? updated : f));
+  }, []);
+
+  const addFinanceRecurring = useCallback(async (values, months) => {
+    const group = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+    const baseDate = new Date(values.date + "T00:00:00");
+    for (let i = 0; i < months; i++) {
+      const d = new Date(baseDate);
+      d.setMonth(d.getMonth() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const saved = await insertRow("finance", { ...values, date: dateStr, recurrenceGroup: group });
+      if (saved) setFinance((prev) => [...prev, saved]);
+    }
   }, []);
 
   const removeClientAndClose = (id) => { removeRow("clients", id); setViewClient(null); };
@@ -1429,6 +1569,11 @@ export default function RSACApp() {
       setClients((prev) => prev.map((c) => c.id === client.id ? updated : c));
       setViewClient((v) => (v && v.id === client.id ? updated : v));
     }
+  };
+
+  const saveMonthlyGoal = async (value) => {
+    setMonthlyGoal(value);
+    await supabase.from("finance_settings").update({ monthly_goal: value }).eq("id", 1);
   };
 
   if (portalData) {
@@ -1613,15 +1758,40 @@ export default function RSACApp() {
               onAddPayment={() => { setFinanceContext({ caseId: viewCase.id, clientId: viewCase.clientId, presetType: "Receita" }); setModal("finance"); }}
               onDeleteFinance={(id) => removeRow("finance", id)} />
           ) : (
-            <ListPage title="Casos" subtitle="Processos e casos em andamento." onAdd={() => { setEditingCase(null); setModal("case"); }}>
-              {cases.map((c) => (
-                <RowCard key={c.id}
-                  onClick={() => setViewCase(c)}
-                  onEdit={() => { setEditingCase(c); setModal("case"); }}
-                  onDelete={() => removeRow("cases", c.id)}
-                  title={c.title} subtitle={`${clientName(c.clientId)}${c.number ? " · " + c.number : ""}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
-              ))}
-              {cases.length === 0 && <Empty text="Nenhum caso cadastrado. Adicione o primeiro." />}
+            <ListPage title="Casos" subtitle="Processos e casos em andamento, agrupados por cliente." onAdd={() => { setEditingCase(null); setModal("case"); }}>
+              {(() => {
+                const byClient = {};
+                cases.forEach((c) => { (byClient[c.clientId || "sem-cliente"] = byClient[c.clientId || "sem-cliente"] || []).push(c); });
+                const clientIds = Object.keys(byClient);
+                if (clientIds.length === 0) return <Empty text="Nenhum caso cadastrado. Adicione o primeiro." />;
+                return clientIds.map((cid) => {
+                  const items = byClient[cid];
+                  const label = cid === "sem-cliente" ? "Sem cliente vinculado" : clientName(cid);
+                  const expanded = expandedCaseClient === cid;
+                  return (
+                    <div key={cid} style={{ marginBottom: 8 }}>
+                      <div onClick={() => setExpandedCaseClient(expanded ? null : cid)} style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        background: "#fff", border: "1px solid #EAE7DC", borderRadius: 8, padding: "12px 14px", cursor: "pointer",
+                      }}>
+                        <span style={{ fontSize: 14, color: INK, fontWeight: 500 }}>{label}</span>
+                        <span style={{ fontSize: 12, color: MUTED }}>{items.length} caso(s) {expanded ? "▲" : "▼"}</span>
+                      </div>
+                      {expanded && (
+                        <div style={{ paddingLeft: 14, marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+                          {items.map((c) => (
+                            <RowCard key={c.id}
+                              onClick={() => setViewCase(c)}
+                              onEdit={() => { setEditingCase(c); setModal("case"); }}
+                              onDelete={() => removeRow("cases", c.id)}
+                              title={c.title} subtitle={`${c.number || "sem número"}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
             </ListPage>
           )
         )}
@@ -1678,25 +1848,11 @@ export default function RSACApp() {
         )}
 
         {tab === "finance" && (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
-              <div>
-                <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Financeiro</h1>
-                <p style={{ color: MUTED, fontSize: 13.5, margin: 0 }}>Honorários e despesas do escritório.</p>
-              </div>
-              <AddButton onClick={() => setModal("finance")} />
-            </div>
-            <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-              <StatCard icon={Wallet} label="Receitas" value={fmtBRL(receitas)} />
-              <StatCard icon={Wallet} label="Despesas" value={fmtBRL(despesas)} />
-              <StatCard icon={Wallet} label="Saldo" value={fmtBRL(receitas - despesas)} />
-            </div>
-            {finance.slice().reverse().map((f) => (
-              <RowCard key={f.id} onDelete={() => removeRow("finance", f.id)} title={f.description} subtitle={`${fmtDate(f.date)}${f.clientId ? " · " + clientName(f.clientId) : ""}`}
-                right={<span style={{ color: f.type === "Receita" ? "#27500A" : "#993D1D", fontSize: 14, fontWeight: 500 }}>{f.type === "Receita" ? "+" : "-"}{fmtBRL(f.amount)}</span>} />
-            ))}
-            {finance.length === 0 && <Empty text="Nenhum lançamento cadastrado." />}
-          </>
+          <FinanceTab finance={finance} clients={clients} monthlyGoal={monthlyGoal} onSaveGoal={saveMonthlyGoal}
+            onAdd={() => { setEditingFinance(null); setFinanceContext(null); setModal("finance"); }}
+            onEdit={(f) => { setEditingFinance(f); setModal("finance"); }}
+            onDelete={(id) => removeRow("finance", id)}
+            clientName={clientName} />
         )}
 
         {tab === "newsletter" && role === "admin" && (
@@ -1705,8 +1861,8 @@ export default function RSACApp() {
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients}
-          editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : null}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients}
+          editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
           taskCaseId={folderCaseId}
           financeContext={financeContext}
           onAddClient={(v) => { addRow("clients", v); setModal(null); }}
@@ -1717,6 +1873,8 @@ export default function RSACApp() {
           onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
           onAddAppt={(v) => { addRow("appts", v); setModal(null); }}
           onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
+          onEditFinance={(id, v) => { editFinanceRow(id, v); setModal(null); setEditingFinance(null); }}
+          onAddFinanceRecurring={(v, months) => { addFinanceRecurring(v, months); setModal(null); setFinanceContext(null); }}
           onAddEvent={(v) => { addRow("events", v); setModal(null); setFolderCaseId(null); }}
           onAddNote={(v) => { addRow("notes", v); setModal(null); setFolderCaseId(null); }}
           onAddDoc={(v) => { addRow("documents", v); setModal(null); setFolderCaseId(null); }}
