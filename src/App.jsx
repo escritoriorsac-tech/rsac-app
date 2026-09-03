@@ -341,7 +341,7 @@ function SubmitRow({ onClose, onSubmit }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -444,15 +444,24 @@ function FormLayer({ modal, onClose, clients, editing, taskCaseId, financeContex
   if (modal === "task") {
     const [title, setTitle] = useState(editing?.title || ""); const [dueDate, setDueDate] = useState(editing?.dueDate || "");
     const [notes, setNotes] = useState(editing?.notes || "");
+    const [caseId, setCaseId] = useState(editing?.caseId || taskCaseId || "");
     return (
       <Modal title={editing ? "Editar tarefa" : taskCaseId ? "Nova tarefa do caso" : "Nova tarefa"} onClose={onClose}>
         <Field label="Descrição"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Protocolar manifestação" /></Field>
         <Field label="Prazo (opcional)"><input type="date" style={inputStyle} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>
+        {editing && (
+          <Field label="Caso vinculado (opcional)">
+            <select style={inputStyle} value={caseId} onChange={(e) => setCaseId(e.target.value)}>
+              <option value="">— Sem caso vinculado —</option>
+              {cases.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="Solução (opcional)"><textarea style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="O que foi feito para resolver…" /></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Descreva a tarefa."); return; }
-          const values = { title: title.trim(), dueDate, notes, caseId: editing ? editing.caseId : (taskCaseId || null) };
+          const values = { title: title.trim(), dueDate, notes, caseId: editing ? (caseId || null) : (taskCaseId || null) };
           if (editing) onEditTask(editing.id, values); else onAddTask(values);
         }} />
       </Modal>
@@ -854,6 +863,215 @@ function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo }) {
         <div style={{ background: "#F1EFE8", borderRadius: 6, padding: "7px 9px", fontSize: 11, color: MUTED, marginTop: 6, marginLeft: 25 }}>
           Solução: {t.notes}
         </div>
+      )}
+    </div>
+  );
+}
+const SIDEBAR_NAVY = "#12283f";
+const SIDEBAR_NAVY_HOVER = "#1a3a5c";
+const GOLD_ACCENT = "#c9a227";
+const GOLD_DARK = "#8a6d3b";
+const ALERT_ON_NAVY = "#d9584f";
+const ALERT_ON_LIGHT = "#c04a40";
+const CARD_BORDER = "#e6e0d2";
+const DIVIDER = "#ddd6c8";
+const CHIP_BG = "#f1ede2";
+
+function caseDeadlineInfo(caseItem, tasks) {
+  const openTasks = tasks.filter((t) => t.caseId === caseItem.id && !t.done);
+  if (openTasks.length === 0) return { openTaskCount: 0, status: "none", label: "sem pendências" };
+  const withDue = openTasks.filter((t) => t.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  if (withDue.length === 0) return { openTaskCount: openTasks.length, status: "upcoming", label: `${openTasks.length} tarefa(s)` };
+  const next = withDue[0];
+  const d = daysUntil(next.dueDate);
+  let status = "upcoming";
+  if (d < 0) status = "overdue";
+  else if (d === 0) status = "today";
+  const label = status === "overdue" ? `prazo vencido há ${Math.abs(d)}d`
+    : status === "today" ? "1 prazo hoje"
+    : `${openTasks.length} tarefa(s) · prazo em ${d}d`;
+  return { openTaskCount: openTasks.length, status, label };
+}
+
+function CaseWorkspace({
+  item, client, clients, events, tasks, notes, documents, precedents, finance,
+  onEdit, onDelete, onOpenClient, onOpenJudge,
+  onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask, onEditTask,
+  onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
+}) {
+  const [wsTab, setWsTab] = useState("tarefas");
+  const judge = clients.find((c) => c.id === item.judgeId);
+  const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
+  const caseTasks = tasks.filter((t) => t.caseId === item.id);
+  const openTaskCount = caseTasks.filter((t) => !t.done).length;
+  const caseNotes = notes.filter((n) => n.caseId === item.id);
+  const caseDocs = documents.filter((d) => d.caseId === item.id);
+  const caseFinance = (finance || []).filter((f) => f.caseId === item.id);
+  const caseExpenses = caseFinance.filter((f) => f.type === "Despesa");
+  const casePayments = caseFinance.filter((f) => f.type === "Receita");
+
+  const TABS = [
+    { id: "tarefas", label: "Tarefas", count: openTaskCount },
+    { id: "prazos", label: "Prazos", count: caseEvents.length },
+    { id: "documentos", label: "Documentos", count: caseDocs.length + caseNotes.length },
+    { id: "financeiro", label: "Financeiro", count: caseFinance.length },
+    { id: "contatos", label: "Contatos", count: 0 },
+  ];
+
+  const addLabel = {
+    tarefas: "+ Nova tarefa", prazos: "+ Adicionar evento", documentos: "+ Adicionar documento",
+    financeiro: "+ Adicionar lançamento", contatos: null,
+  }[wsTab];
+  const addAction = {
+    tarefas: onAddTask, prazos: onAddEvent, documentos: onAddDoc, financeiro: onAddExpense, contatos: null,
+  }[wsTab];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, marginBottom: 18 }}>
+        <div>
+          <div style={{ fontSize: 11, letterSpacing: 1.5, fontWeight: 600, color: GOLD_DARK, marginBottom: 6, textTransform: "uppercase" }}>
+            CASO · {item.caseType === "Judicial" ? "PROCESSO JUDICIAL" : "CONSULTORIA"}
+          </div>
+          <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 600, fontSize: 30, lineHeight: 1.15, color: NAVY, margin: 0 }}>{item.title}</h1>
+          <div style={{ fontSize: 13, color: MUTED, marginTop: 8 }}>
+            {[item.number, item.vara].filter(Boolean).join(" · ") || "sem dados processuais"}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button onClick={onEdit} style={{ background: "#fff", border: "1px solid #E3E0D6", color: NAVY, fontSize: 13, fontWeight: 600, padding: "10px 14px", borderRadius: 6, cursor: "pointer" }}>Editar</button>
+          {addAction && (
+            <button onClick={addAction} style={{ background: NAVY, color: "#f5efe4", border: "none", fontSize: 14, fontWeight: 600, padding: "11px 18px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>{addLabel}</button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20 }}>
+        {TABS.map((t) => {
+          const active = wsTab === t.id;
+          return (
+            <button key={t.id} onClick={() => setWsTab(t.id)} style={{
+              background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+              fontSize: 14, fontWeight: active ? 600 : 400, color: active ? NAVY : "#6b6455",
+              padding: "0 0 11px", borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              {t.label}
+              {t.count > 0 && <span style={{ fontSize: 12, color: "#857d6c" }}>{t.count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {wsTab === "tarefas" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {caseTasks.length === 0 && <p style={{ fontSize: 15, color: "#857d6c", textAlign: "center", padding: "30px 0" }}>Nenhuma tarefa neste caso.</p>}
+          {caseTasks.map((t) => (
+            <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "14px 18px", opacity: t.done ? 0.72 : 1 }}>
+              <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {wsTab === "prazos" && (
+        <>
+          <SectionCard title="Dados processuais">
+            <InfoRow label="Número" value={item.number} />
+            <InfoRow label="Área" value={item.area} />
+            {item.caseType === "Judicial" && <>
+              <InfoRow label="Tribunal" value={item.tribunal} />
+              <InfoRow label="Comarca" value={item.comarca} />
+              <InfoRow label="Instância" value={item.instancia} />
+              <InfoRow label="Vara" value={item.vara} />
+            </>}
+            {item.tribunalLink && (
+              <div style={{ marginTop: 10 }}>
+                <a href={item.tribunalLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", textDecoration: "none" }}>Consultar no tribunal ↗</a>
+              </div>
+            )}
+          </SectionCard>
+          <SectionCard title="Andamento processual">
+            <Timeline events={caseEvents} onDelete={onDeleteEvent} />
+          </SectionCard>
+        </>
+      )}
+
+      {wsTab === "documentos" && (
+        <>
+          <SectionCard title="Banco de petições">
+            {caseDocs.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum documento referenciado ainda.</p>}
+            {caseDocs.map((d) => (
+              <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <div style={{ fontSize: 13, color: INK }}>{d.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {d.driveLink && <a href={d.driveLink} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: NAVY }}>Abrir no Drive ↗</a>}
+                  <button onClick={() => onDeleteDoc(d.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </SectionCard>
+          <SectionCard title="Anotações">
+            {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+            {caseNotes.map((n) => (
+              <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <div><div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div><div style={{ fontSize: 13, color: INK }}>{n.content}</div></div>
+                <button onClick={() => onDeleteNote(n.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+              </div>
+            ))}
+            <button onClick={onAddNote} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar anotação</button>
+          </SectionCard>
+        </>
+      )}
+
+      {wsTab === "financeiro" && (
+        <>
+          <SectionCard title="Despesas processuais">
+            {caseExpenses.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma despesa registrada ainda.</p>}
+            {caseExpenses.map((f) => (
+              <RowCard key={f.id} title={f.description} subtitle={fmtDate(f.date)} onDelete={() => onDeleteFinance(f.id)}
+                right={<span style={{ color: "#993D1D", fontSize: 13.5, fontWeight: 500 }}>-{fmtBRL(f.amount)}</span>} />
+            ))}
+            <button onClick={onAddExpense} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar despesa processual</button>
+          </SectionCard>
+          <SectionCard title="Pagamentos do cliente">
+            {casePayments.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum pagamento registrado ainda.</p>}
+            {casePayments.map((f) => (
+              <RowCard key={f.id} title={f.description} subtitle={fmtDate(f.date)} onDelete={() => onDeleteFinance(f.id)}
+                right={<span style={{ color: "#27500A", fontSize: 13.5, fontWeight: 500 }}>+{fmtBRL(f.amount)}</span>} />
+            ))}
+            <button onClick={onAddPayment} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar pagamento do cliente</button>
+          </SectionCard>
+        </>
+      )}
+
+      {wsTab === "contatos" && (
+        <>
+          <SectionCard title="Cliente">
+            {client ? (
+              <RowCard onClick={() => onOpenClient(client)} title={client.name} subtitle={`${client.type === "PJ" ? "Pessoa jurídica" : "Pessoa física"} · ${client.email || "sem e-mail"}`} />
+            ) : (
+              <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum cliente vinculado.</p>
+            )}
+          </SectionCard>
+          {item.caseType === "Judicial" && (
+            <SectionCard title="Juiz e gabinete">
+              {judge ? (
+                <>
+                  <RowCard onClick={() => onOpenJudge(judge)} title={judge.name} subtitle={judge.address || "Ver cadastro completo"} />
+                  <div style={{ marginTop: 10 }}><InfoRowEmail label="E-mail" value={judge.email} /><InfoRow label="Telefone" value={judge.phone} /></div>
+                </>
+              ) : (
+                <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum juiz vinculado. Edite o caso para selecionar um contato do tipo Juiz.</p>
+              )}
+              {item.balcaoVirtualLink && (
+                <div style={{ marginTop: 10 }}>
+                  <a href={item.balcaoVirtualLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", textDecoration: "none" }}>Balcão virtual ↗</a>
+                </div>
+              )}
+            </SectionCard>
+          )}
+        </>
       )}
     </div>
   );
@@ -1430,6 +1648,8 @@ export default function RSACApp() {
   const [editingFinance, setEditingFinance] = useState(null);
   const [viewClient, setViewClient] = useState(null);
   const [contactGroup, setContactGroup] = useState(null);
+  const [activeCaseId, setActiveCaseId] = useState(null);
+  const [showMoreNav, setShowMoreNav] = useState(false);
   const [expandedCaseClient, setExpandedCaseClient] = useState(null);
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
@@ -1514,7 +1734,8 @@ export default function RSACApp() {
   const removeClientAndClose = (id) => { removeRow("clients", id); setViewClient(null); };
   const removeCaseAndClose = (id) => { removeRow("cases", id); setViewCase(null); };
 
-  const goToTab = (id) => { setTab(id); setViewClient(null); setViewCase(null); setContactGroup(null); setSearch(""); };
+  const goToTab = (id) => { setTab(id); setViewClient(null); setViewCase(null); setActiveCaseId(null); setContactGroup(null); setSearch(""); };
+  const openCase = (id) => { setActiveCaseId(id); setViewClient(null); setViewCase(null); };
 
   const toggleTask = useCallback(async (id) => {
     const t = tasks.find((x) => x.id === id);
@@ -1536,13 +1757,23 @@ export default function RSACApp() {
 
   const NAV = [
     { id: "dashboard", label: "Painel", icon: LayoutDashboard },
-    { id: "clients", label: "Contatos", icon: Users },
-    { id: "cases", label: "Casos", icon: Briefcase },
-    { id: "tasks", label: "Tarefas", icon: CheckSquare },
+    { id: "tasks", label: "Todas as tarefas", icon: CheckSquare },
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
     { id: "finance", label: "Financeiro", icon: Wallet },
+  ];
+  const SECONDARY_NAV = [
+    { id: "clients", label: "Contatos", icon: Users },
+    { id: "cases", label: "Todos os casos", icon: Briefcase },
     ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
   ];
+  const activeCasesList = cases
+    .filter((c) => c.status === "Ativo")
+    .map((c) => ({ ...c, deadline: caseDeadlineInfo(c, tasks) }))
+    .sort((a, b) => {
+      const order = { overdue: 0, today: 1, upcoming: 2, none: 3 };
+      return order[a.deadline.status] - order[b.deadline.status];
+    })
+    .slice(0, 8);
 
   const saveNewsletter = async (values) => {
     const { data, error } = await supabase.from("newsletters").insert([{
@@ -1588,33 +1819,108 @@ export default function RSACApp() {
 
   return (
     <div style={{ display: "flex", minHeight: 560, background: CREAM, fontFamily: "Arial, sans-serif", borderRadius: 10, overflow: "hidden", border: "1px solid #EAE7DC" }}>
-      <div style={{ width: 210, background: NAVY, padding: "28px 0", display: "flex", flexDirection: "column", flexShrink: 0 }}>
-        <div style={{ padding: "0 16px 22px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 18 }}>
+      <div style={{ width: 268, background: SIDEBAR_NAVY, padding: "26px 16px 20px", display: "flex", flexDirection: "column", gap: 22, flexShrink: 0 }}>
+        <div style={{ textAlign: "center", padding: "0 8px 16px", borderBottom: "1px solid rgba(232,226,213,0.16)" }}>
           <Logo dark />
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 10px" }}>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {NAV.map((n) => {
-            const active = tab === n.id;
+            const active = !activeCaseId && tab === n.id;
             const Icon = n.icon;
             return (
-              <button key={n.id} onClick={() => goToTab(n.id)} style={{ display: "flex", alignItems: "center", gap: 10, background: active ? "rgba(176,141,87,0.16)" : "transparent", border: "none", borderLeft: active ? `2px solid ${GOLD}` : "2px solid transparent", color: active ? "#EDE6D8" : "#B9C2CC", padding: "10px 12px", fontSize: 13.5, cursor: "pointer", textAlign: "left", borderRadius: 4, fontFamily: "inherit" }}>
-                <Icon size={16} color={active ? GOLD : "#B9C2CC"} />
+              <button key={n.id} onClick={() => goToTab(n.id)} style={{
+                display: "flex", alignItems: "center", gap: 12, padding: active ? "10px 12px 10px 9px" : "10px 12px",
+                borderRadius: 6, fontSize: 15, background: active ? "rgba(240,234,221,0.10)" : "transparent",
+                borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "none", border: "none",
+                color: active ? "#f5efe4" : "rgba(240,234,221,0.82)", fontWeight: active ? 600 : 400,
+                cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+              }}>
+                <Icon size={17} color={active ? GOLD_ACCENT : "rgba(240,234,221,0.7)"} />
                 {n.label}
               </button>
             );
           })}
         </div>
-        <div style={{ marginTop: "auto", padding: "16px" }}>
-          <div style={{ fontSize: 10.5, color: "#7C8794", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 12, marginBottom: 10 }}>
-            {session.user?.email}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minHeight: 0, overflowY: "auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 12px 6px" }}>
+            <span style={{ fontSize: 10, letterSpacing: 1.5, fontWeight: 600, color: "rgba(240,234,221,0.45)" }}>CASOS ATIVOS</span>
+            <button onClick={() => { setEditingCase(null); setModal("case"); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.5)", fontSize: 15, padding: 0 }}>+</button>
           </div>
-          <button onClick={() => supabase.auth.signOut()} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#B9C2CC", fontSize: 12.5, cursor: "pointer", padding: 0 }}>
+          {activeCasesList.length === 0 && (
+            <div style={{ padding: "6px 12px", fontSize: 12, color: "rgba(240,234,221,0.4)" }}>Nenhum caso ativo.</div>
+          )}
+          {activeCasesList.map((c) => {
+            const active = activeCaseId === c.id;
+            const statusColorOnNavy = c.deadline.status === "overdue" || c.deadline.status === "today" ? ALERT_ON_NAVY
+              : c.deadline.status === "upcoming" ? GOLD_ACCENT : "rgba(240,234,221,0.45)";
+            return (
+              <div key={c.id} onClick={() => openCase(c.id)} title={c.title} style={{
+                padding: "10px 12px", borderRadius: 6, cursor: "pointer",
+                background: active ? "rgba(240,234,221,0.10)" : "transparent",
+                borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "3px solid transparent",
+              }}>
+                <div style={{
+                  fontSize: 14, lineHeight: 1.35, color: active ? "#f5efe4" : "rgba(240,234,221,0.8)", fontWeight: active ? 600 : 400,
+                  display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+                }}>{c.title}</div>
+                <div style={{ fontSize: 11, marginTop: 4, color: statusColorOnNavy }}>{c.deadline.label}</div>
+              </div>
+            );
+          })}
+          <button onClick={() => goToTab("cases")} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.5)", fontSize: 12, textAlign: "left", padding: "8px 12px 0" }}>Ver todos os casos →</button>
+        </div>
+
+        <div style={{ paddingTop: 18, borderTop: "1px solid rgba(232,226,213,0.16)" }}>
+          {showMoreNav && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 10 }}>
+              {SECONDARY_NAV.map((n) => (
+                <button key={n.id} onClick={() => { goToTab(n.id); setShowMoreNav(false); }} style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", color: "rgba(240,234,221,0.7)", fontSize: 13, cursor: "pointer", padding: "6px 4px", textAlign: "left", fontFamily: "inherit" }}>
+                  <n.icon size={14} /> {n.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <button onClick={() => setShowMoreNav((v) => !v)} style={{ background: "none", border: "none", color: "rgba(240,234,221,0.5)", fontSize: 12, cursor: "pointer", padding: 0, marginBottom: 10 }}>
+            {showMoreNav ? "Menos opções ▲" : "Mais opções ▾"}
+          </button>
+          <div style={{ fontSize: 12, color: "rgba(240,234,221,0.5)", marginBottom: 10 }}>{session.user?.email}</div>
+          <button onClick={() => supabase.auth.signOut()} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "rgba(240,234,221,0.7)", fontSize: 12.5, cursor: "pointer", padding: 0 }}>
             <LogOut size={14} /> Sair
           </button>
         </div>
       </div>
 
       <div style={{ flex: 1, padding: "28px 32px", overflowY: "auto" }}>
+        {activeCaseId ? (
+          (() => {
+            const wsCase = cases.find((c) => c.id === activeCaseId);
+            if (!wsCase) return <Empty text="Caso não encontrado." />;
+            return (
+              <CaseWorkspace item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
+                events={events} tasks={tasks} notes={notes} documents={documents} precedents={precedents} finance={finance}
+                onEdit={() => { setEditingCase(wsCase); setModal("case"); }}
+                onDelete={() => { removeRow("cases", wsCase.id); setActiveCaseId(null); }}
+                onOpenClient={(c) => { setActiveCaseId(null); setTab("clients"); setViewClient(c); }}
+                onOpenJudge={(j) => { setActiveCaseId(null); setTab("clients"); setViewClient(j); }}
+                onAddEvent={() => { setFolderCaseId(wsCase.id); setModal("event"); }}
+                onDeleteEvent={(id) => removeRow("events", id)}
+                onToggleTask={toggleTask}
+                onDeleteTask={(id) => removeRow("tasks", id)}
+                onAddTask={() => { setFolderCaseId(wsCase.id); setModal("task"); }}
+                onEditTask={(t) => { setEditingTask(t); setModal("task"); }}
+                onAddNote={() => { setFolderCaseId(wsCase.id); setModal("note"); }}
+                onDeleteNote={(id) => removeRow("notes", id)}
+                onAddDoc={() => { setFolderCaseId(wsCase.id); setModal("document"); }}
+                onDeleteDoc={(id) => removeRow("documents", id)}
+                onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
+                onAddPayment={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Receita" }); setModal("finance"); }}
+                onDeleteFinance={(id) => removeRow("finance", id)} />
+            );
+          })()
+        ) : (
+        <>
         {tab === "dashboard" && (
           <>
             <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Painel</h1>
@@ -1662,7 +1968,7 @@ export default function RSACApp() {
               onBack={() => setViewClient(null)}
               onEdit={() => { setEditingClient(viewClient); setModal("client"); }}
               onDelete={() => removeClientAndClose(viewClient.id)}
-              onOpenCase={(c) => { setViewClient(null); setTab("cases"); setViewCase(c); }}
+              onOpenCase={(c) => openCase(c.id)}
               onToggleOptIn={() => toggleOptIn(viewClient)}
               onAddPrecedent={() => { setFolderCaseId(viewClient.id); setModal("precedent"); }}
               onDeletePrecedent={(id) => removeRow("precedents", id)} />
@@ -1736,29 +2042,7 @@ export default function RSACApp() {
         )}
 
         {tab === "cases" && (
-          viewCase ? (
-            <CaseFolder item={viewCase} client={clients.find((c) => c.id === viewCase.clientId)} clients={clients}
-              events={events} tasks={tasks} notes={notes} documents={documents} precedents={precedents} finance={finance}
-              onBack={() => setViewCase(null)}
-              onEdit={() => { setEditingCase(viewCase); setModal("case"); }}
-              onDelete={() => removeCaseAndClose(viewCase.id)}
-              onOpenClient={(c) => { setViewCase(null); setTab("clients"); setViewClient(c); }}
-              onOpenJudge={(j) => { setViewCase(null); setTab("clients"); setViewClient(j); }}
-              onAddEvent={() => { setFolderCaseId(viewCase.id); setModal("event"); }}
-              onDeleteEvent={(id) => removeRow("events", id)}
-              onToggleTask={toggleTask}
-              onDeleteTask={(id) => removeRow("tasks", id)}
-              onAddTask={() => { setFolderCaseId(viewCase.id); setModal("task"); }}
-              onEditTask={(t) => { setEditingTask(t); setModal("task"); }}
-              onAddNote={() => { setFolderCaseId(viewCase.id); setModal("note"); }}
-              onDeleteNote={(id) => removeRow("notes", id)}
-              onAddDoc={() => { setFolderCaseId(viewCase.id); setModal("document"); }}
-              onDeleteDoc={(id) => removeRow("documents", id)}
-              onAddExpense={() => { setFinanceContext({ caseId: viewCase.id, clientId: viewCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
-              onAddPayment={() => { setFinanceContext({ caseId: viewCase.id, clientId: viewCase.clientId, presetType: "Receita" }); setModal("finance"); }}
-              onDeleteFinance={(id) => removeRow("finance", id)} />
-          ) : (
-            <ListPage title="Casos" subtitle="Processos e casos em andamento, agrupados por cliente." onAdd={() => { setEditingCase(null); setModal("case"); }}>
+          <ListPage title="Casos" subtitle="Processos e casos em andamento, agrupados por cliente." onAdd={() => { setEditingCase(null); setModal("case"); }}>
               {(() => {
                 const byClient = {};
                 cases.forEach((c) => { (byClient[c.clientId || "sem-cliente"] = byClient[c.clientId || "sem-cliente"] || []).push(c); });
@@ -1781,7 +2065,7 @@ export default function RSACApp() {
                         <div style={{ paddingLeft: 14, marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
                           {items.map((c) => (
                             <RowCard key={c.id}
-                              onClick={() => setViewCase(c)}
+                              onClick={() => openCase(c.id)}
                               onEdit={() => { setEditingCase(c); setModal("case"); }}
                               onDelete={() => removeRow("cases", c.id)}
                               title={c.title} subtitle={`${c.number || "sem número"}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
@@ -1792,8 +2076,7 @@ export default function RSACApp() {
                   );
                 });
               })()}
-            </ListPage>
-          )
+          </ListPage>
         )}
 
         {tab === "tasks" && (
@@ -1813,7 +2096,7 @@ export default function RSACApp() {
                 <>
                   {caseGroups.map((g) => (
                     <div key={g.caseItem.id} style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 10.5, color: "#9A917E", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{g.caseItem.title}</div>
+                      <div onClick={() => openCase(g.caseItem.id)} style={{ fontSize: 10.5, color: "#9A917E", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, cursor: "pointer" }}>{g.caseItem.title} →</div>
                       <div style={{ background: "#fff", border: "1px solid #EAE7DC", borderRadius: 8, padding: "4px 12px" }}>
                         {g.items.map((t) => (
                           <TaskRow key={t.id} t={t} onToggle={toggleTask} onDelete={(id) => removeRow("tasks", id)}
@@ -1858,10 +2141,12 @@ export default function RSACApp() {
         {tab === "newsletter" && role === "admin" && (
           <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
         )}
+        </>
+        )}
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases}
           editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
           taskCaseId={folderCaseId}
           financeContext={financeContext}
