@@ -1039,6 +1039,8 @@ function CaseWorkspace({
               <InfoRow label="Instância" value={item.instancia} />
               <InfoRow label="Vara" value={item.vara} />
             </>}
+            <InfoRow label="Valor da causa" value={item.valorCausa ? fmtBRL(item.valorCausa) : null} />
+            <InfoRow label="Honorários contratuais" value={item.honorariosContratuais ? fmtBRL(item.honorariosContratuais) : null} />
             {item.tribunalLink && (
               <div style={{ marginTop: 10 }}>
                 <a href={item.tribunalLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", textDecoration: "none" }}>Consultar no tribunal ↗</a>
