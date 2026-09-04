@@ -74,8 +74,8 @@ const STATUS_COLORS = {
 
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code });
-const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link });
-const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id });
+const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais });
+const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
@@ -120,8 +120,8 @@ async function loadAll() {
 
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null };
-  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null };
-  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null };
+  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null };
+  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: row.paid !== undefined ? row.paid : true, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
@@ -341,7 +341,7 @@ function SubmitRow({ onClose, onSubmit }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -393,12 +393,14 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
     const [instancia, setInstancia] = useState(editing?.instancia || ""); const [vara, setVara] = useState(editing?.vara || "");
     const [tribunalLink, setTribunalLink] = useState(editing?.tribunalLink || "");
     const [balcaoVirtualLink, setBalcaoVirtualLink] = useState(editing?.balcaoVirtualLink || "");
+    const [valorCausa, setValorCausa] = useState(editing?.valorCausa || "");
+    const [honorariosContratuais, setHonorariosContratuais] = useState(editing?.honorariosContratuais || "");
     const [judgeId, setJudgeId] = useState(editing?.judgeId || "");
-    const judges = clients.filter((c) => c.contactType === "Juiz");
+    const judges = sortByName(clients.filter((c) => c.contactType === "Juiz"));
     return (
       <Modal title={editing ? "Editar caso" : "Novo caso"} onClose={onClose}>
         <Field label="Título do caso"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Planejamento sucessório" /></Field>
-        <Field label="Cliente"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">Selecionar…</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+        <Field label="Cliente"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">Selecionar…</option>{sortByName(clients).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
         <Field label="Natureza do caso">
           <div style={{ display: "flex", gap: 8 }}>
             {["Consultoria", "Judicial"].map((t) => (
@@ -426,15 +428,25 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
             </Field>
             <Field label="Link de consulta processual (opcional)"><input style={inputStyle} value={tribunalLink} onChange={(e) => setTribunalLink(e.target.value)} placeholder="https://..." /></Field>
             <Field label="Balcão virtual da vara (opcional)"><input style={inputStyle} value={balcaoVirtualLink} onChange={(e) => setBalcaoVirtualLink(e.target.value)} placeholder="https://..." /></Field>
+            <Field label="Valor da causa (R$, opcional)"><input type="number" step="0.01" style={inputStyle} value={valorCausa} onChange={(e) => setValorCausa(e.target.value)} placeholder="0,00" /></Field>
+            <Field label="Honorários contratuais (R$, opcional)"><input type="number" step="0.01" style={inputStyle} value={honorariosContratuais} onChange={(e) => setHonorariosContratuais(e.target.value)} placeholder="0,00" /></Field>
           </>
         )}
-        <Field label="Número do processo (opcional)"><input style={inputStyle} value={number} onChange={(e) => setNumber(e.target.value)} /></Field>
+        {caseType === "Consultoria" ? (
+          <Field label="Número">
+            <div style={{ ...inputStyle, background: "#F1EFE8", color: MUTED, display: "flex", alignItems: "center" }}>
+              {editing?.number || "Gerado automaticamente (NNNN/AAAA) ao salvar"}
+            </div>
+          </Field>
+        ) : (
+          <Field label="Número do processo (opcional)"><input style={inputStyle} value={number} onChange={(e) => setNumber(e.target.value)} /></Field>
+        )}
         <Field label="Área"><input style={inputStyle} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Tributário, empresarial…" /></Field>
         <Field label="Status"><select style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}><option>Ativo</option><option>Suspenso</option><option>Encerrado</option></select></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Informe o título do caso."); return; }
-          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId, balcaoVirtualLink };
+          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId, balcaoVirtualLink, valorCausa: valorCausa ? Number(valorCausa) : null, honorariosContratuais: honorariosContratuais ? Number(honorariosContratuais) : null };
           if (editing) onEditCase(editing.id, values); else onAddCase(values);
         }} />
       </Modal>
@@ -445,6 +457,10 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
     const [title, setTitle] = useState(editing?.title || ""); const [dueDate, setDueDate] = useState(editing?.dueDate || "");
     const [notes, setNotes] = useState(editing?.notes || "");
     const [caseId, setCaseId] = useState(editing?.caseId || taskCaseId || "");
+    const [recurrent, setRecurrent] = useState(false);
+    const [every, setEvery] = useState(1);
+    const [unit, setUnit] = useState("month");
+    const [times, setTimes] = useState(2);
     return (
       <Modal title={editing ? "Editar tarefa" : taskCaseId ? "Nova tarefa do caso" : "Nova tarefa"} onClose={onClose}>
         <Field label="Descrição"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Protocolar manifestação" /></Field>
@@ -458,11 +474,44 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
           </Field>
         )}
         <Field label="Solução (opcional)"><textarea style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="O que foi feito para resolver…" /></Field>
+        {!editing && dueDate && (
+          <>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 13, color: INK }}>
+              <input type="checkbox" checked={recurrent} onChange={(e) => setRecurrent(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD }} />
+              Recorrente
+            </label>
+            {recurrent && (
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <Field label="Repetir a cada">
+                    <input type="number" min="1" style={inputStyle} value={every} onChange={(e) => setEvery(e.target.value)} />
+                  </Field>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Field label="Frequência">
+                    <select style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)}>
+                      <option value="day">Dia(s)</option>
+                      <option value="week">Semana(s)</option>
+                      <option value="month">Mês(es)</option>
+                    </select>
+                  </Field>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Field label="Quantas vezes">
+                    <input type="number" min="2" style={inputStyle} value={times} onChange={(e) => setTimes(e.target.value)} />
+                  </Field>
+                </div>
+              </div>
+            )}
+          </>
+        )}
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Descreva a tarefa."); return; }
-          const values = { title: title.trim(), dueDate, notes, caseId: editing ? (caseId || null) : (taskCaseId || null) };
-          if (editing) onEditTask(editing.id, values); else onAddTask(values);
+          const base = { title: title.trim(), dueDate, notes, caseId: editing ? (caseId || null) : (taskCaseId || null) };
+          if (editing) { onEditTask(editing.id, base); return; }
+          if (recurrent && dueDate && Number(times) > 1) onAddTaskRecurring(base, Number(every), unit, Number(times));
+          else onAddTask(base);
         }} />
       </Modal>
     );
@@ -498,7 +547,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
         <Field label="Valor (R$)"><input type="number" step="0.01" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" /></Field>
         <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Conta bancária (opcional)"><input style={inputStyle} value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Ex: Banco do Brasil — CC 12345-6" /></Field>
-        <Field label="Cliente (opcional)"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+        <Field label="Cliente (opcional)"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{sortByName(clients).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
         <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 13, color: INK }}>
           <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD }} />
           {type === "Despesa" ? "Já foi pago" : "Já foi recebido"}
@@ -782,6 +831,10 @@ function ClientFolder({ client, cases, finance, precedents, onBack, onEdit, onDe
   );
 }
 
+function sortByName(arr) {
+  return [...arr].sort((a, b) => (a.name || "").localeCompare(b.name || "", "pt-BR"));
+}
+
 function daysUntil(dateStr) {
   if (!dateStr) return null;
   const today = new Date(todayISO() + "T00:00:00");
@@ -842,6 +895,7 @@ function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo }) {
           <div style={{ fontSize: 13, textDecoration: t.done ? "line-through" : "none", color: t.done ? MUTED : INK }}>
             {t.title}
             {t.isStallAlert && <span style={{ fontSize: 9.5, background: "#FBE3DC", color: "#993D1D", padding: "1px 7px", borderRadius: 10, marginLeft: 8 }}>Automático</span>}
+            {t.recurrenceGroup && <span style={{ fontSize: 9.5, background: "#EAE7DC", color: "#6b6a63", padding: "1px 7px", borderRadius: 10, marginLeft: 8 }}>↻ recorrente</span>}
           </div>
           {showDueInfo && t.dueDate && (
             <div style={{ fontSize: 11, color: overdue ? "#993D1D" : MUTED }}>
@@ -1107,6 +1161,8 @@ function CaseFolder({
           <InfoRow label="Comarca" value={item.comarca} />
           <InfoRow label="Instância" value={item.instancia} />
           <InfoRow label="Vara" value={item.vara} />
+          <InfoRow label="Valor da causa" value={item.valorCausa ? fmtBRL(item.valorCausa) : null} />
+          <InfoRow label="Honorários contratuais" value={item.honorariosContratuais ? fmtBRL(item.honorariosContratuais) : null} />
           {item.tribunalLink && (
             <div style={{ marginTop: 10 }}>
               <a href={item.tribunalLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", textDecoration: "none" }}>
@@ -1650,6 +1706,7 @@ export default function RSACApp() {
   const [contactGroup, setContactGroup] = useState(null);
   const [activeCaseId, setActiveCaseId] = useState(null);
   const [showMoreNav, setShowMoreNav] = useState(false);
+  const [taskDayFilter, setTaskDayFilter] = useState(null);
   const [expandedCaseClient, setExpandedCaseClient] = useState(null);
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
@@ -1728,6 +1785,20 @@ export default function RSACApp() {
       const dateStr = d.toISOString().slice(0, 10);
       const saved = await insertRow("finance", { ...values, date: dateStr, recurrenceGroup: group });
       if (saved) setFinance((prev) => [...prev, saved]);
+    }
+  }, []);
+
+  const addTaskRecurring = useCallback(async (values, every, unit, times) => {
+    const group = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+    const baseDate = new Date(values.dueDate + "T00:00:00");
+    for (let i = 0; i < times; i++) {
+      const d = new Date(baseDate);
+      if (unit === "day") d.setDate(d.getDate() + every * i);
+      else if (unit === "week") d.setDate(d.getDate() + every * 7 * i);
+      else d.setMonth(d.getMonth() + every * i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const saved = await insertRow("tasks", { ...values, dueDate: dateStr, recurrenceGroup: group });
+      if (saved) setTasks((prev) => [...prev, saved]);
     }
   }, []);
 
@@ -1977,12 +2048,12 @@ export default function RSACApp() {
               <SearchBar value={search} onChange={setSearch} placeholder="Buscar contato (em todos os grupos)…" />
               {(() => {
                 const q = search.trim().toLowerCase();
-                const filtered = clients.filter((c) => {
+                const filtered = sortByName(clients.filter((c) => {
                   if (!q) return true;
                   return [c.name, c.email, c.phone, c.cpfCnpj, c.address, c.contactType]
                     .filter(Boolean)
                     .some((field) => field.toLowerCase().includes(q));
-                });
+                }));
                 const groups = ["Cliente", "Colaborador", "Parte contrária", "Juiz"];
                 const groupLabels = { "Cliente": "Clientes", "Colaborador": "Colaboradores", "Parte contrária": "Partes contrárias", "Juiz": "Juízes" };
 
@@ -2007,7 +2078,7 @@ export default function RSACApp() {
 
                 // Sem busca, dentro de um grupo: mostra a lista daquele grupo
                 if (contactGroup) {
-                  const items = clients.filter((c) => (c.contactType || "Cliente") === contactGroup);
+                  const items = sortByName(clients.filter((c) => (c.contactType || "Cliente") === contactGroup));
                   return (
                     <>
                       <button onClick={() => setContactGroup(null)} style={{ background: "none", border: "none", color: MUTED, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 12 }}>← Voltar aos grupos</button>
@@ -2082,9 +2153,48 @@ export default function RSACApp() {
         {tab === "tasks" && (
           <ListPage title="Tarefas" subtitle="Pendências do escritório, agrupadas por caso." onAdd={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }}>
             {(() => {
+              const todayStr = todayISO();
+              const today = new Date(todayStr + "T00:00:00");
+              const weekStart = new Date(today);
+              weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+              const dayLabels = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"];
+              const weekDays = Array.from({ length: 7 }, (_, i) => {
+                const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+                return d.toISOString().slice(0, 10);
+              });
+              const tasksByDay = {};
+              tasks.forEach((t) => { if (t.dueDate) (tasksByDay[t.dueDate] = tasksByDay[t.dueDate] || []).push(t); });
+
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 18 }}>
+                  {weekDays.map((iso, i) => {
+                    const isToday = iso === todayStr;
+                    const isSelected = taskDayFilter === iso;
+                    const hasItems = !!tasksByDay[iso];
+                    const dateNum = Number(iso.slice(8, 10));
+                    return (
+                      <div key={iso} onClick={() => setTaskDayFilter(isSelected ? null : iso)} style={{
+                        textAlign: "center", padding: "8px 2px", borderRadius: 6, cursor: "pointer",
+                        background: isSelected ? GOLD : isToday ? NAVY : "#fff",
+                        border: isSelected || isToday ? "none" : "1px solid #E3E0D6",
+                      }}>
+                        <div style={{ fontSize: 9, color: isSelected ? "#12283f" : isToday ? "#B9C2CC" : "#9A917E" }}>{dayLabels[i]}</div>
+                        <div style={{ fontSize: 14, margin: "2px 0", color: isSelected ? "#12283f" : isToday ? "#EDE6D8" : INK }}>{dateNum}</div>
+                        {hasItems && <div style={{ width: 4, height: 4, borderRadius: "50%", margin: "0 auto", background: isSelected || isToday ? "#fff" : GOLD }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            {taskDayFilter && (
+              <button onClick={() => setTaskDayFilter(null)} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 12 }}>← Ver todas as tarefas</button>
+            )}
+            {(() => {
+              const visibleTasks = taskDayFilter ? tasks.filter((t) => t.dueDate === taskDayFilter) : tasks;
               const byCase = {};
               const noCase = [];
-              tasks.forEach((t) => {
+              visibleTasks.forEach((t) => {
                 if (t.caseId) { (byCase[t.caseId] = byCase[t.caseId] || []).push(t); }
                 else noCase.push(t);
               });
@@ -2092,6 +2202,9 @@ export default function RSACApp() {
                 caseItem: cases.find((c) => c.id === cid),
                 items: byCase[cid],
               })).filter((g) => g.caseItem);
+              if (caseGroups.length === 0 && noCase.length === 0) {
+                return <Empty text={taskDayFilter ? "Nenhuma tarefa para este dia." : "Nenhuma tarefa cadastrada. Adicione a primeira."} />;
+              }
               return (
                 <>
                   {caseGroups.map((g) => (
@@ -2119,7 +2232,6 @@ export default function RSACApp() {
                 </>
               );
             })()}
-            {tasks.length === 0 && <Empty text="Nenhuma tarefa cadastrada. Adicione a primeira." />}
           </ListPage>
         )}
 
@@ -2155,6 +2267,7 @@ export default function RSACApp() {
           onAddCase={(v) => { addRow("cases", v); setModal(null); }}
           onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
           onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
+          onAddTaskRecurring={(v, every, unit, times) => { addTaskRecurring(v, every, unit, times); setModal(null); setFolderCaseId(null); }}
           onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
           onAddAppt={(v) => { addRow("appts", v); setModal(null); }}
           onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
