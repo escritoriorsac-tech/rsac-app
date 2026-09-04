@@ -74,7 +74,7 @@ const STATUS_COLORS = {
 
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code });
-const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais });
+const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group });
@@ -120,7 +120,7 @@ async function loadAll() {
 
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null };
-  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null };
+  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: row.paid !== undefined ? row.paid : true, recurrence_group: row.recurrenceGroup || null };
@@ -395,6 +395,8 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
     const [balcaoVirtualLink, setBalcaoVirtualLink] = useState(editing?.balcaoVirtualLink || "");
     const [valorCausa, setValorCausa] = useState(editing?.valorCausa || "");
     const [honorariosContratuais, setHonorariosContratuais] = useState(editing?.honorariosContratuais || "");
+    const [honorariosTipo, setHonorariosTipo] = useState(editing?.honorariosTipo || "fixo");
+    const [condenacaoResultado, setCondenacaoResultado] = useState(editing?.condenacaoResultado || "");
     const [judgeId, setJudgeId] = useState(editing?.judgeId || "");
     const judges = sortByName(clients.filter((c) => c.contactType === "Juiz"));
     return (
@@ -429,7 +431,22 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
             <Field label="Link de consulta processual (opcional)"><input style={inputStyle} value={tribunalLink} onChange={(e) => setTribunalLink(e.target.value)} placeholder="https://..." /></Field>
             <Field label="Balcão virtual da vara (opcional)"><input style={inputStyle} value={balcaoVirtualLink} onChange={(e) => setBalcaoVirtualLink(e.target.value)} placeholder="https://..." /></Field>
             <Field label="Valor da causa (R$, opcional)"><input type="number" step="0.01" style={inputStyle} value={valorCausa} onChange={(e) => setValorCausa(e.target.value)} placeholder="0,00" /></Field>
-            <Field label="Honorários contratuais (R$, opcional)"><input type="number" step="0.01" style={inputStyle} value={honorariosContratuais} onChange={(e) => setHonorariosContratuais(e.target.value)} placeholder="0,00" /></Field>
+            <Field label="Tipo de honorários contratuais">
+              <div style={{ display: "flex", gap: 8 }}>
+                {[{ v: "fixo", l: "Valor fixo (R$)" }, { v: "percentual", l: "Percentual (%)" }].map((o) => (
+                  <div key={o.v} onClick={() => setHonorariosTipo(o.v)} style={{
+                    flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 6, cursor: "pointer",
+                    border: honorariosTipo === o.v ? "1.5px solid #B08D57" : "1px solid #E3E0D6",
+                    background: honorariosTipo === o.v ? "rgba(176,141,87,0.1)" : "#fff",
+                    fontSize: 12.5, color: honorariosTipo === o.v ? NAVY : MUTED,
+                  }}>{o.l}</div>
+                ))}
+              </div>
+            </Field>
+            <Field label={honorariosTipo === "percentual" ? "Honorários contratuais (%, opcional)" : "Honorários contratuais (R$, opcional)"}>
+              <input type="number" step="0.01" style={inputStyle} value={honorariosContratuais} onChange={(e) => setHonorariosContratuais(e.target.value)} placeholder={honorariosTipo === "percentual" ? "Ex: 20" : "0,00"} />
+            </Field>
+            <Field label="Condenação / Resultado (R$, opcional)"><input type="number" step="0.01" style={inputStyle} value={condenacaoResultado} onChange={(e) => setCondenacaoResultado(e.target.value)} placeholder="0,00" /></Field>
           </>
         )}
         {caseType === "Consultoria" ? (
@@ -446,7 +463,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Informe o título do caso."); return; }
-          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId, balcaoVirtualLink, valorCausa: valorCausa ? Number(valorCausa) : null, honorariosContratuais: honorariosContratuais ? Number(honorariosContratuais) : null };
+          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId, balcaoVirtualLink, valorCausa: valorCausa ? Number(valorCausa) : null, honorariosContratuais: honorariosContratuais ? Number(honorariosContratuais) : null, honorariosTipo, condenacaoResultado: condenacaoResultado ? Number(condenacaoResultado) : null };
           if (editing) onEditCase(editing.id, values); else onAddCase(values);
         }} />
       </Modal>
@@ -1040,7 +1057,13 @@ function CaseWorkspace({
               <InfoRow label="Vara" value={item.vara} />
             </>}
             <InfoRow label="Valor da causa" value={item.valorCausa ? fmtBRL(item.valorCausa) : null} />
-            <InfoRow label="Honorários contratuais" value={item.honorariosContratuais ? fmtBRL(item.honorariosContratuais) : null} />
+            <InfoRow label="Condenação / Resultado" value={item.condenacaoResultado ? fmtBRL(item.condenacaoResultado) : null} />
+            <InfoRow label="Honorários contratuais" value={
+              !item.honorariosContratuais ? null
+              : item.honorariosTipo === "percentual"
+                ? `${item.honorariosContratuais}%${item.condenacaoResultado ? ` (${fmtBRL(item.condenacaoResultado * item.honorariosContratuais / 100)} sobre a condenação)` : ""}`
+                : fmtBRL(item.honorariosContratuais)
+            } />
             {item.tribunalLink && (
               <div style={{ marginTop: 10 }}>
                 <a href={item.tribunalLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 12px", textDecoration: "none" }}>Consultar no tribunal ↗</a>
