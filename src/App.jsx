@@ -45,17 +45,36 @@ async function fetchGoogleEvents(accessToken, monthDate) {
 
 async function pushEventToGoogle(accessToken, appt) {
   try {
-    await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
+    let start, end;
+    if (appt.time) {
+      start = { dateTime: `${appt.date}T${appt.time}:00`, timeZone: tz };
+      const [h, m] = appt.time.split(":").map(Number);
+      const endDate = new Date(appt.date + "T00:00:00");
+      endDate.setHours(h, m + 60);
+      const endTime = `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`;
+      end = { dateTime: `${appt.date}T${endTime}:00`, timeZone: tz };
+    } else {
+      start = { date: appt.date };
+      end = { date: appt.date };
+    }
+    const resp = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        summary: appt.title,
-        location: appt.location || undefined,
-        start: appt.time ? { dateTime: `${appt.date}T${appt.time}:00` } : { date: appt.date },
-        end: appt.time ? { dateTime: `${appt.date}T${appt.time}:00` } : { date: appt.date },
-      }),
+      body: JSON.stringify({ summary: appt.title, location: appt.location || undefined, start, end }),
     });
-  } catch (e) { console.error("Falha ao enviar evento ao Google Agenda", e); }
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      console.error("Falha ao enviar evento ao Google Agenda", resp.status, errBody);
+      alert(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). O compromisso foi salvo no app normalmente.`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Falha ao enviar evento ao Google Agenda", e);
+    alert("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). O compromisso foi salvo no app normalmente.");
+    return false;
+  }
 }
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
