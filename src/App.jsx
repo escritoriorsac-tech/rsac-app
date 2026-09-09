@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
-  Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail
+  Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -177,13 +177,13 @@ function Logo({ dark = true, size = "normal" }) {
   const big = size === "big";
   return (
     <div style={{ textAlign: "center" }}>
-      <div style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: big ? 34 : 22, letterSpacing: big ? 8 : 5, color: dark ? "#EDE6D8" : NAVY }}>RSAC</div>
+      <div style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: big ? 34 : 26, letterSpacing: big ? 8 : "0.34em", color: dark ? (big ? "#EDE6D8" : "#f0eadd") : NAVY }}>RSAC</div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, margin: big ? "10px 0 8px" : "6px 0 4px" }}>
         <div style={{ width: big ? 60 : 36, height: 1, background: GOLD }} />
         <div style={{ width: 4, height: 4, borderRadius: 4, background: GOLD }} />
         <div style={{ width: big ? 60 : 36, height: 1, background: GOLD }} />
       </div>
-      <div style={{ fontFamily: "Georgia, serif", fontSize: big ? 10 : 7.5, letterSpacing: 2, color: dark ? "#9A917E" : MUTED }}>
+      <div style={{ fontFamily: "Georgia, serif", fontSize: big ? 10 : 8, letterSpacing: big ? 2 : "0.2em", lineHeight: big ? "normal" : 1.6, color: dark ? (big ? "#9A917E" : "rgba(240,234,221,0.55)") : MUTED, marginTop: big ? 0 : 6 }}>
         RODRIGO SANTOS ADVOCACIA{big ? <br /> : " "}E CONSULTORIA
       </div>
       {big && (
@@ -920,24 +920,40 @@ function Timeline({ events, onDelete }) {
   );
 }
 
-function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo }) {
+function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo, variant }) {
   const d = daysUntil(t.dueDate);
   const overdue = d !== null && d < 0 && !t.done;
+  const dueToday = d === 0 && !t.done;
   const status = taskStatus(t);
+  const isCard = variant === "card";
+
+  const metaColor = t.done ? TEXT_META : (overdue || dueToday) ? ALERT_ON_LIGHT : TEXT_META;
+  const metaWeight = !t.done && (overdue || dueToday) ? 600 : 400;
+  const metaText = t.done
+    ? `concluída · ${fmtDate(t.dueDate)}`
+    : overdue ? `vencido há ${Math.abs(d)} dia(s)`
+    : d === 0 ? "vence hoje"
+    : `vence em ${d} dia(s)`;
+
   return (
-    <div style={{ padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <input type="checkbox" checked={t.done} onChange={() => onToggle(t.id)} style={{ width: 15, height: 15, accentColor: GOLD, flexShrink: 0 }} />
+    <div style={isCard ? { display: "flex", alignItems: "center", gap: 14 } : { padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: isCard ? 14 : 10, width: "100%" }}>
+        <div onClick={() => onToggle(t.id)} style={{
+          width: isCard ? 17 : 15, height: isCard ? 17 : 15, borderRadius: isCard ? 3 : "50%", flexShrink: 0, cursor: "pointer",
+          border: t.done ? "none" : `1.5px solid ${isCard ? ICON_INACTIVE : "#B8B0A0"}`,
+          background: t.done ? SIDEBAR_NAVY : "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {t.done && <Check size={isCard ? 12 : 10} color="#f5efe4" strokeWidth={3} />}
+        </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, textDecoration: t.done ? "line-through" : "none", color: t.done ? MUTED : INK }}>
+          <div style={{ fontSize: isCard ? 16 : 13, textDecoration: t.done ? "line-through" : "none", color: t.done ? TEXT_META : TEXT_PRIMARY }}>
             {t.title}
             {t.isStallAlert && <span style={{ fontSize: 9.5, background: "#FBE3DC", color: "#993D1D", padding: "1px 7px", borderRadius: 10, marginLeft: 8 }}>Automático</span>}
-            {t.recurrenceGroup && <span style={{ fontSize: 9.5, background: "#EAE7DC", color: "#6b6a63", padding: "1px 7px", borderRadius: 10, marginLeft: 8 }}>↻ recorrente</span>}
+            {t.recurrenceGroup && <span style={{ fontSize: 9.5, background: CHIP_BG, color: TEXT_SECONDARY, padding: "1px 7px", borderRadius: 10, marginLeft: 8 }}>↻ recorrente</span>}
           </div>
           {showDueInfo && t.dueDate && (
-            <div style={{ fontSize: 11, color: overdue ? "#993D1D" : MUTED }}>
-              {t.done ? `concluída · ${fmtDate(t.dueDate)}` : overdue ? `vencido há ${Math.abs(d)} dia(s)` : d === 0 ? "vence hoje" : `vence em ${d} dia(s)`}
-            </div>
+            <div style={{ fontSize: isCard ? 13 : 11, marginTop: isCard ? 2 : 0, color: metaColor, fontWeight: metaWeight }}>{metaText}</div>
           )}
         </div>
         {status && (
@@ -947,11 +963,15 @@ function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo }) {
             color: status === "No prazo" ? "#27500A" : "#993D1D",
           }}>{status}</span>
         )}
-        {onEdit && <button onClick={() => onEdit(t)} style={{ background: "none", border: "none", cursor: "pointer", color: MUTED }}><Pencil size={13} /></button>}
-        <button onClick={() => onDelete(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+        {onEdit && <button onClick={() => onEdit(t)} style={{ background: "none", border: "none", cursor: "pointer", color: ICON_INACTIVE, padding: isCard ? 10 : 4 }}><Pencil size={isCard ? 15 : 13} /></button>}
+        <button onClick={() => onDelete(t.id)} style={{ background: "none", border: "none", cursor: "pointer", color: ICON_INACTIVE, padding: isCard ? 10 : 4 }}><Trash2 size={isCard ? 15 : 14} /></button>
       </div>
       {t.notes && (
-        <div style={{ background: "#F1EFE8", borderRadius: 6, padding: "7px 9px", fontSize: 11, color: MUTED, marginTop: 6, marginLeft: 25 }}>
+        <div style={{
+          background: CHIP_BG, borderRadius: 6, padding: isCard ? "10px 14px" : "7px 9px",
+          fontSize: isCard ? 13 : 11, color: isCard ? "#4a4438" : MUTED,
+          marginTop: isCard ? 8 : 6, marginLeft: isCard ? 31 : 25,
+        }}>
           Solução: {t.notes}
         </div>
       )}
@@ -967,12 +987,22 @@ const ALERT_ON_LIGHT = "#c04a40";
 const CARD_BORDER = "#e6e0d2";
 const DIVIDER = "#ddd6c8";
 const CHIP_BG = "#f1ede2";
+const CONTENT_BG = "#fbf9f4";
+const TEXT_PRIMARY = "#23201a";
+const TEXT_SECONDARY = "#6b6455";
+const TEXT_META = "#857d6c";
+const ICON_INACTIVE = "#b8b0a0";
+const NAV_TEXT_SECONDARY = "rgba(240,234,221,0.82)";
+const NAV_TEXT_TERTIARY = "rgba(240,234,221,0.45)";
+const NAV_HOVER_BG = "rgba(240,234,221,0.06)";
+const NAV_ACTIVE_BG = "rgba(240,234,221,0.10)";
+const NAV_DIVIDER = "rgba(232,226,213,0.16)";
 
 function caseDeadlineInfo(caseItem, tasks) {
   const openTasks = tasks.filter((t) => t.caseId === caseItem.id && !t.done);
-  if (openTasks.length === 0) return { openTaskCount: 0, status: "none", label: "sem pendências" };
+  if (openTasks.length === 0) return { openTaskCount: 0, status: "none", label: "sem pendências", nextDueDate: null };
   const withDue = openTasks.filter((t) => t.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  if (withDue.length === 0) return { openTaskCount: openTasks.length, status: "upcoming", label: `${openTasks.length} tarefa(s)` };
+  if (withDue.length === 0) return { openTaskCount: openTasks.length, status: "upcoming", label: `${openTasks.length} tarefa(s)`, nextDueDate: null };
   const next = withDue[0];
   const d = daysUntil(next.dueDate);
   let status = "upcoming";
@@ -981,7 +1011,7 @@ function caseDeadlineInfo(caseItem, tasks) {
   const label = status === "overdue" ? `prazo vencido há ${Math.abs(d)}d`
     : status === "today" ? "1 prazo hoje"
     : `${openTasks.length} tarefa(s) · prazo em ${d}d`;
-  return { openTaskCount: openTasks.length, status, label };
+  return { openTaskCount: openTasks.length, status, label, nextDueDate: next.dueDate };
 }
 
 function CaseWorkspace({
@@ -1024,15 +1054,15 @@ function CaseWorkspace({
           <div style={{ fontSize: 11, letterSpacing: 1.5, fontWeight: 600, color: GOLD_DARK, marginBottom: 6, textTransform: "uppercase" }}>
             CASO · {item.caseType === "Judicial" ? "PROCESSO JUDICIAL" : "CONSULTORIA"}
           </div>
-          <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 600, fontSize: 30, lineHeight: 1.15, color: NAVY, margin: 0 }}>{item.title}</h1>
+          <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 600, fontSize: 32, lineHeight: 1.15, color: SIDEBAR_NAVY, margin: 0 }}>{item.title}</h1>
           <div style={{ fontSize: 13, color: MUTED, marginTop: 8 }}>
             {[item.number, item.vara].filter(Boolean).join(" · ") || "sem dados processuais"}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          <button onClick={onEdit} style={{ background: "#fff", border: "1px solid #E3E0D6", color: NAVY, fontSize: 13, fontWeight: 600, padding: "10px 14px", borderRadius: 6, cursor: "pointer" }}>Editar</button>
+          <button onClick={onEdit} style={{ background: "#fff", border: "1px solid #E3E0D6", color: SIDEBAR_NAVY, fontSize: 13, fontWeight: 600, padding: "10px 14px", borderRadius: 6, cursor: "pointer" }}>Editar</button>
           {addAction && (
-            <button onClick={addAction} style={{ background: NAVY, color: "#f5efe4", border: "none", fontSize: 14, fontWeight: 600, padding: "11px 18px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>{addLabel}</button>
+            <button onClick={addAction} style={{ background: SIDEBAR_NAVY, color: "#f5efe4", border: "none", fontSize: 14, fontWeight: 600, padding: "11px 18px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>{addLabel}</button>
           )}
         </div>
       </div>
@@ -1043,12 +1073,12 @@ function CaseWorkspace({
           return (
             <button key={t.id} onClick={() => setWsTab(t.id)} style={{
               background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
-              fontSize: 14, fontWeight: active ? 600 : 400, color: active ? NAVY : "#6b6455",
+              fontSize: 14, fontWeight: active ? 600 : 400, color: active ? SIDEBAR_NAVY : TEXT_SECONDARY,
               padding: "0 0 11px", borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
               display: "flex", alignItems: "center", gap: 6,
             }}>
               {t.label}
-              {t.count > 0 && <span style={{ fontSize: 12, color: "#857d6c" }}>{t.count}</span>}
+              {t.count > 0 && <span style={{ fontSize: 12, color: TEXT_META }}>{t.count}</span>}
             </button>
           );
         })}
@@ -1056,10 +1086,21 @@ function CaseWorkspace({
 
       {wsTab === "tarefas" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {caseTasks.length === 0 && <p style={{ fontSize: 15, color: "#857d6c", textAlign: "center", padding: "30px 0" }}>Nenhuma tarefa neste caso.</p>}
-          {caseTasks.map((t) => (
-            <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "14px 18px", opacity: t.done ? 0.72 : 1 }}>
-              <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo />
+          {caseTasks.length === 0 && (
+            <div style={{ textAlign: "center", padding: "30px 0" }}>
+              <p style={{ fontSize: 15, color: TEXT_META, margin: "0 0 12px" }}>Nenhuma tarefa neste caso.</p>
+              <button onClick={onAddTask} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, color: SIDEBAR_NAVY, fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 6, cursor: "pointer" }}>Adicionar tarefa</button>
+            </div>
+          )}
+          {caseTasks.slice().sort((a, b) => {
+            if (a.done !== b.done) return a.done ? 1 : -1;
+            if (!a.dueDate && !b.dueDate) return 0;
+            if (!a.dueDate) return 1;
+            if (!b.dueDate) return -1;
+            return a.dueDate.localeCompare(b.dueDate);
+          }).map((t) => (
+            <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px", opacity: t.done ? 0.72 : 1 }}>
+              <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" />
             </div>
           ))}
         </div>
@@ -1760,6 +1801,8 @@ export default function RSACApp() {
   const [contactGroup, setContactGroup] = useState(null);
   const [activeCaseId, setActiveCaseId] = useState(null);
   const [showMoreNav, setShowMoreNav] = useState(false);
+  const [hoveredNavId, setHoveredNavId] = useState(null);
+  const [hoveredCaseItemId, setHoveredCaseItemId] = useState(null);
   const [taskDayFilter, setTaskDayFilter] = useState(null);
   const [googleToken, setGoogleToken] = useState(null);
   const [expandedCaseClient, setExpandedCaseClient] = useState(null);
@@ -1926,7 +1969,12 @@ export default function RSACApp() {
     .map((c) => ({ ...c, deadline: caseDeadlineInfo(c, tasks) }))
     .sort((a, b) => {
       const order = { overdue: 0, today: 1, upcoming: 2, none: 3 };
-      return order[a.deadline.status] - order[b.deadline.status];
+      const byStatus = order[a.deadline.status] - order[b.deadline.status];
+      if (byStatus !== 0) return byStatus;
+      if (a.deadline.nextDueDate && b.deadline.nextDueDate) return a.deadline.nextDueDate.localeCompare(b.deadline.nextDueDate);
+      if (a.deadline.nextDueDate) return -1;
+      if (b.deadline.nextDueDate) return 1;
+      return (a.title || "").localeCompare(b.title || "", "pt-BR");
     })
     .slice(0, 8);
 
@@ -1982,14 +2030,17 @@ export default function RSACApp() {
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {NAV.map((n) => {
             const active = !activeCaseId && tab === n.id;
+            const hovered = hoveredNavId === n.id && !active;
             const Icon = n.icon;
             return (
-              <button key={n.id} onClick={() => goToTab(n.id)} style={{
+              <button key={n.id} onClick={() => goToTab(n.id)}
+                onMouseEnter={() => setHoveredNavId(n.id)} onMouseLeave={() => setHoveredNavId(null)}
+                style={{
                 display: "flex", alignItems: "center", gap: 12, padding: active ? "10px 12px 10px 9px" : "10px 12px",
-                borderRadius: 6, fontSize: 15, background: active ? "rgba(240,234,221,0.10)" : "transparent",
+                borderRadius: 6, fontSize: 15, background: active ? NAV_ACTIVE_BG : hovered ? NAV_HOVER_BG : "transparent",
                 borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "none", border: "none",
-                color: active ? "#f5efe4" : "rgba(240,234,221,0.82)", fontWeight: active ? 600 : 400,
-                cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                color: active || hovered ? "#f5efe4" : NAV_TEXT_SECONDARY, fontWeight: active ? 600 : 400,
+                cursor: "pointer", textAlign: "left", fontFamily: "inherit", transition: "background 120ms ease, color 120ms ease",
               }}>
                 <Icon size={17} color={active ? GOLD_ACCENT : "rgba(240,234,221,0.7)"} />
                 {n.label}
@@ -2008,13 +2059,17 @@ export default function RSACApp() {
           )}
           {activeCasesList.map((c) => {
             const active = activeCaseId === c.id;
+            const hovered = hoveredCaseItemId === c.id && !active;
             const statusColorOnNavy = c.deadline.status === "overdue" || c.deadline.status === "today" ? ALERT_ON_NAVY
               : c.deadline.status === "upcoming" ? GOLD_ACCENT : "rgba(240,234,221,0.45)";
             return (
-              <div key={c.id} onClick={() => openCase(c.id)} title={c.title} style={{
+              <div key={c.id} onClick={() => openCase(c.id)} title={c.title}
+                onMouseEnter={() => setHoveredCaseItemId(c.id)} onMouseLeave={() => setHoveredCaseItemId(null)}
+                style={{
                 padding: "10px 12px", borderRadius: 6, cursor: "pointer",
-                background: active ? "rgba(240,234,221,0.10)" : "transparent",
+                background: active ? NAV_ACTIVE_BG : hovered ? NAV_HOVER_BG : "transparent",
                 borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "3px solid transparent",
+                transition: "background 120ms ease",
               }}>
                 <div style={{
                   fontSize: 14, lineHeight: 1.35, color: active ? "#f5efe4" : "rgba(240,234,221,0.8)", fontWeight: active ? 600 : 400,
@@ -2047,7 +2102,7 @@ export default function RSACApp() {
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: "28px 32px", overflowY: "auto" }}>
+      <div style={{ flex: 1, padding: "28px 32px", overflowY: "auto", background: CONTENT_BG }}>
         {activeCaseId ? (
           (() => {
             const wsCase = cases.find((c) => c.id === activeCaseId);
