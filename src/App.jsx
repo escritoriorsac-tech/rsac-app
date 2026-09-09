@@ -43,7 +43,7 @@ async function fetchGoogleEvents(accessToken, monthDate) {
   }));
 }
 
-async function pushEventToGoogle(accessToken, appt) {
+async function pushEventToGoogle(accessToken, appt, silent) {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
     let start, end;
@@ -66,14 +66,15 @@ async function pushEventToGoogle(accessToken, appt) {
     if (!resp.ok) {
       const errBody = await resp.text();
       console.error("Falha ao enviar evento ao Google Agenda", resp.status, errBody);
-      alert(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). O compromisso foi salvo no app normalmente.`);
+      if (!silent) alert(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). O compromisso foi salvo no app normalmente.`);
       return false;
     }
     return true;
   } catch (e) {
     console.error("Falha ao enviar evento ao Google Agenda", e);
-    alert("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). O compromisso foi salvo no app normalmente.");
+    if (!silent) alert("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). O compromisso foi salvo no app normalmente.");
     return false;
+
   }
 }
 
@@ -95,7 +96,7 @@ const STATUS_COLORS = {
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group });
-const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location });
+const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
 const toNote = (r) => ({ id: r.id, caseId: r.case_id, date: r.note_date, content: r.content });
@@ -141,7 +142,7 @@ function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null };
-  if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location };
+  if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: row.paid !== undefined ? row.paid : true, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
   if (key === "notes") return { case_id: row.caseId, note_date: row.date || todayISO(), content: row.content };
@@ -1342,12 +1343,13 @@ function CaseFolder({
   );
 }
 
-function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onTokenAcquired }) {
+function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onTokenAcquired, onSyncAll }) {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleEvents, setGoogleEvents] = useState([]);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
   const tokenRef = React.useRef(null);
   const tokenClientRef = React.useRef(null);
 
@@ -1421,6 +1423,13 @@ function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onToke
           }}>
             {googleConnected ? "Sincronizado com Google Agenda" : googleBusy ? "Conectando…" : "Conectar Google Agenda"}
           </button>
+          {googleConnected && appts.some((a) => !a.googleSynced) && (
+            <button onClick={async () => { setSyncingAll(true); await onSyncAll(); setSyncingAll(false); }} disabled={syncingAll} style={{
+              background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 12px", fontSize: 12, color: NAVY, cursor: "pointer",
+            }}>
+              {syncingAll ? "Sincronizando…" : "Sincronizar todos"}
+            </button>
+          )}
           <AddButton onClick={onAddAppt} />
         </div>
       </div>
@@ -1790,6 +1799,35 @@ export default function RSACApp() {
     const saved = await insertRow(key, row);
     if (saved) setters[key]((prev) => [...prev, saved]);
   }, [clients, cases, tasks, appts, finance]);
+
+  const addApptAndSync = useCallback(async (values) => {
+    const saved = await insertRow("appts", values);
+    if (!saved) return;
+    setAppts((prev) => [...prev, saved]);
+    if (googleToken) {
+      const ok = await pushEventToGoogle(googleToken, saved);
+      if (ok) {
+        const updated = await editRow("appts", saved.id, { ...saved, googleSynced: true });
+        if (updated) setAppts((prev) => prev.map((a) => a.id === saved.id ? updated : a));
+      }
+    }
+  }, [googleToken]);
+
+  const syncAllAppts = useCallback(async () => {
+    if (!googleToken) return { total: 0, ok: 0 };
+    const pending = appts.filter((a) => !a.googleSynced);
+    let okCount = 0;
+    for (const a of pending) {
+      const ok = await pushEventToGoogle(googleToken, a, true);
+      if (ok) {
+        okCount++;
+        const updated = await editRow("appts", a.id, { ...a, googleSynced: true });
+        if (updated) setAppts((prev) => prev.map((x) => x.id === a.id ? updated : x));
+      }
+    }
+    alert(`Sincronização concluída: ${okCount} de ${pending.length} compromisso(s) enviados ao Google Agenda.`);
+    return { total: pending.length, ok: okCount };
+  }, [googleToken, appts]);
 
   const removeRow = useCallback(async (key, id) => {
     setters[key]((prev) => prev.filter((r) => r.id !== id));
@@ -2286,7 +2324,8 @@ export default function RSACApp() {
             onDeleteAppt={(id) => removeRow("appts", id)}
             onDeleteTask={(id) => removeRow("tasks", id)}
             onAddAppt={() => setModal("appt")}
-            onTokenAcquired={setGoogleToken} />
+            onTokenAcquired={setGoogleToken}
+            onSyncAll={syncAllAppts} />
         )}
 
         {tab === "finance" && (
@@ -2316,7 +2355,7 @@ export default function RSACApp() {
           onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
           onAddTaskRecurring={(v, every, unit, times) => { addTaskRecurring(v, every, unit, times); setModal(null); setFolderCaseId(null); }}
           onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
-          onAddAppt={(v) => { addRow("appts", v); if (googleToken) pushEventToGoogle(googleToken, v); setModal(null); }}
+          onAddAppt={(v) => { addApptAndSync(v); setModal(null); }}
           onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
           onEditFinance={(id, v) => { editFinanceRow(id, v); setModal(null); setEditingFinance(null); }}
           onAddFinanceRecurring={(v, months) => { addFinanceRecurring(v, months); setModal(null); setFinanceContext(null); }}
