@@ -1323,7 +1323,7 @@ function CaseFolder({
   );
 }
 
-function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt }) {
+function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onTokenAcquired }) {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [googleConnected, setGoogleConnected] = useState(false);
@@ -1350,6 +1350,7 @@ function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt }) {
           if (resp?.access_token) {
             tokenRef.current = resp.access_token;
             setGoogleConnected(true);
+            if (onTokenAcquired) onTokenAcquired(resp.access_token);
             const evs = await fetchGoogleEvents(resp.access_token, viewMonth);
             setGoogleEvents(evs);
           }
@@ -1732,6 +1733,7 @@ export default function RSACApp() {
   const [activeCaseId, setActiveCaseId] = useState(null);
   const [showMoreNav, setShowMoreNav] = useState(false);
   const [taskDayFilter, setTaskDayFilter] = useState(null);
+  const [googleToken, setGoogleToken] = useState(null);
   const [expandedCaseClient, setExpandedCaseClient] = useState(null);
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
@@ -2264,7 +2266,8 @@ export default function RSACApp() {
           <AgendaTab appts={appts} tasks={tasks}
             onDeleteAppt={(id) => removeRow("appts", id)}
             onDeleteTask={(id) => removeRow("tasks", id)}
-            onAddAppt={() => setModal("appt")} />
+            onAddAppt={() => setModal("appt")}
+            onTokenAcquired={setGoogleToken} />
         )}
 
         {tab === "finance" && (
@@ -2294,7 +2297,7 @@ export default function RSACApp() {
           onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
           onAddTaskRecurring={(v, every, unit, times) => { addTaskRecurring(v, every, unit, times); setModal(null); setFolderCaseId(null); }}
           onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
-          onAddAppt={(v) => { addRow("appts", v); setModal(null); }}
+          onAddAppt={(v) => { addRow("appts", v); if (googleToken) pushEventToGoogle(googleToken, v); setModal(null); }}
           onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
           onEditFinance={(id, v) => { editFinanceRow(id, v); setModal(null); setEditingFinance(null); }}
           onAddFinanceRecurring={(v, months) => { addFinanceRecurring(v, months); setModal(null); setFinanceContext(null); }}
