@@ -400,20 +400,21 @@ function SubmitRow({ onClose, onSubmit, submitLabel }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
-    const [name, setName] = useState(editing?.name || ""); const [type, setType] = useState(editing?.type || "PF");
-    const [email, setEmail] = useState(editing?.email || ""); const [phone, setPhone] = useState(editing?.phone || "");
-    const [cpfCnpj, setCpfCnpj] = useState(editing?.cpfCnpj || ""); const [rg, setRg] = useState(editing?.rg || "");
-    const [contactType, setContactType] = useState(editing?.contactType || "Cliente");
-    const [address, setAddress] = useState(editing?.address || "");
-    const [nacionalidade, setNacionalidade] = useState(editing?.nacionalidade || "brasileiro(a)");
-    const [estadoCivil, setEstadoCivil] = useState(editing?.estadoCivil || "");
-    const [profissao, setProfissao] = useState(editing?.profissao || "");
-    const [orgaoExpedidorRg, setOrgaoExpedidorRg] = useState(editing?.orgaoExpedidorRg || "");
-    const [representanteLegal, setRepresentanteLegal] = useState(editing?.representanteLegal || "");
+    const src = editing || prefill;
+    const [name, setName] = useState(src?.name || ""); const [type, setType] = useState(src?.type || "PF");
+    const [email, setEmail] = useState(src?.email || ""); const [phone, setPhone] = useState(src?.phone || "");
+    const [cpfCnpj, setCpfCnpj] = useState(src?.cpfCnpj || ""); const [rg, setRg] = useState(src?.rg || "");
+    const [contactType, setContactType] = useState(src?.contactType || "Cliente");
+    const [address, setAddress] = useState(src?.address || "");
+    const [nacionalidade, setNacionalidade] = useState(src?.nacionalidade || "brasileiro(a)");
+    const [estadoCivil, setEstadoCivil] = useState(src?.estadoCivil || "");
+    const [profissao, setProfissao] = useState(src?.profissao || "");
+    const [orgaoExpedidorRg, setOrgaoExpedidorRg] = useState(src?.orgaoExpedidorRg || "");
+    const [representanteLegal, setRepresentanteLegal] = useState(src?.representanteLegal || "");
     return (
       <Modal title={editing ? "Editar contato" : "Novo contato"} onClose={onClose}>
         <Field label="Nome"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo ou razão social" /></Field>
@@ -1143,6 +1144,7 @@ function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
   const items = [
     { id: "finance", label: "Financeiro", icon: Wallet },
     { id: "clients", label: "Contatos", icon: Users },
+    { id: "intake", label: "Cadastros pendentes", icon: CheckSquare },
     ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
   ];
   return (
@@ -2062,6 +2064,80 @@ function FinanceTab({
   );
 }
 
+function IntakeReviewTab({ onUseSubmission }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [links, setLinks] = useState({});
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("client_intake").select("*").eq("status", "pendente").order("created_at", { ascending: false });
+    setItems(data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const getLink = async (path) => {
+    if (!path || links[path]) return;
+    const { data } = await supabase.storage.from("client-intake").createSignedUrl(path, 3600);
+    if (data?.signedUrl) setLinks((prev) => ({ ...prev, [path]: data.signedUrl }));
+  };
+
+  const markProcessed = async (id) => {
+    await supabase.from("client_intake").update({ status: "processado" }).eq("id", id);
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  };
+  const remove = async (id) => {
+    await supabase.from("client_intake").delete().eq("id", id);
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  const FileLink = ({ path, label }) => {
+    if (!path) return null;
+    return (
+      <a href={links[path] || "#"} onClick={(e) => { if (!links[path]) { e.preventDefault(); getLink(path); } }} target="_blank" rel="noreferrer"
+        style={{ fontSize: 12, color: NAVY, border: "1px solid #E3E0D6", borderRadius: 6, padding: "5px 10px", textDecoration: "none", marginRight: 6, display: "inline-block", marginTop: 6 }}>
+        {links[path] ? `Abrir ${label} ↗` : `Gerar link — ${label}`}
+      </a>
+    );
+  };
+
+  return (
+    <>
+      <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Cadastros pendentes</h1>
+      <p style={{ color: MUTED, fontSize: 13.5, margin: "0 0 20px" }}>Fichas enviadas pelo formulário público, aguardando revisão.</p>
+      {loading && <p style={{ color: MUTED, fontSize: 13 }}>Carregando…</p>}
+      {!loading && items.length === 0 && <Empty text="Nenhum cadastro pendente no momento." />}
+      {items.map((i) => (
+        <SectionCard key={i.id} title={i.name}>
+          <InfoRow label="Tipo" value={i.type === "PJ" ? "Pessoa jurídica" : "Pessoa física"} />
+          <InfoRow label={i.type === "PJ" ? "CNPJ" : "CPF"} value={i.cpf_cnpj} />
+          {i.type === "PF" && <InfoRow label="RG" value={i.rg ? `${i.rg}${i.orgao_expedidor_rg ? " " + i.orgao_expedidor_rg : ""}` : null} />}
+          {i.type === "PF" && <InfoRow label="Nacionalidade" value={i.nacionalidade} />}
+          {i.type === "PF" && <InfoRow label="Estado civil" value={i.estado_civil} />}
+          {i.type === "PF" && <InfoRow label="Profissão" value={i.profissao} />}
+          {i.type === "PJ" && <InfoRow label="Representante legal" value={i.representante_legal} />}
+          <InfoRow label="Endereço" value={i.address} />
+          <InfoRowEmail label="E-mail" value={i.email} />
+          <InfoRow label="Telefone" value={i.phone} />
+          <InfoRow label="Enviado em" value={fmtDate(i.created_at?.slice(0, 10))} />
+          <div style={{ marginTop: 6 }}>
+            <FileLink path={i.doc_identidade_path} label="documento de identidade" />
+            <FileLink path={i.comprovante_residencia_path} label="comprovante de residência" />
+            <FileLink path={i.cartao_cnpj_path} label="cartão CNPJ" />
+            <FileLink path={i.contrato_social_path} label="contrato social" />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button onClick={() => onUseSubmission(i)} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 12.5, cursor: "pointer" }}>Cadastrar como contato</button>
+            <button onClick={() => markProcessed(i.id)} style={{ background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "8px 14px", fontSize: 12.5, color: NAVY, cursor: "pointer" }}>Marcar como processado</button>
+            <button onClick={() => remove(i.id)} style={{ background: "none", border: "none", color: "#C0997B", cursor: "pointer", padding: "8px" }}><Trash2 size={15} /></button>
+          </div>
+        </SectionCard>
+      ))}
+    </>
+  );
+}
+
 function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -2163,6 +2239,137 @@ function NewsletterTab({ clients, newsletters, onSave, onDelete }) {
   );
 }
 
+function IntakeForm() {
+  const [type, setType] = useState("PF");
+  const [name, setName] = useState(""); const [cpfCnpj, setCpfCnpj] = useState("");
+  const [rg, setRg] = useState(""); const [orgaoExpedidorRg, setOrgaoExpedidorRg] = useState("");
+  const [nacionalidade, setNacionalidade] = useState("brasileiro(a)"); const [estadoCivil, setEstadoCivil] = useState("");
+  const [profissao, setProfissao] = useState(""); const [representanteLegal, setRepresentanteLegal] = useState("");
+  const [address, setAddress] = useState(""); const [email, setEmail] = useState(""); const [phone, setPhone] = useState("");
+  const [docIdentidade, setDocIdentidade] = useState(null); const [comprovanteResidencia, setComprovanteResidencia] = useState(null);
+  const [cartaoCnpj, setCartaoCnpj] = useState(null); const [contratoSocial, setContratoSocial] = useState(null);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [done, setDone] = useState(false);
+
+  const uploadFile = async (file, label) => {
+    if (!file) return null;
+    const ext = file.name.split(".").pop();
+    const path = `${crypto.randomUUID()}/${label}.${ext}`;
+    const { error } = await supabase.storage.from("client-intake").upload(path, file);
+    if (error) throw new Error(`Falha ao enviar ${label}: ${error.message}`);
+    return path;
+  };
+
+  const submit = async () => {
+    setError("");
+    if (!name.trim()) { setError("Informe seu nome completo ou razão social."); return; }
+    setBusy(true);
+    try {
+      const [docIdentidadePath, comprovanteResidenciaPath, cartaoCnpjPath, contratoSocialPath] = await Promise.all([
+        uploadFile(docIdentidade, "documento_identidade"),
+        uploadFile(comprovanteResidencia, "comprovante_residencia"),
+        uploadFile(cartaoCnpj, "cartao_cnpj"),
+        uploadFile(contratoSocial, "contrato_social"),
+      ]);
+      const { error: insertError } = await supabase.from("client_intake").insert([{
+        type, name: name.trim(), cpf_cnpj: cpfCnpj, rg: type === "PF" ? rg : null,
+        orgao_expedidor_rg: type === "PF" ? orgaoExpedidorRg : null,
+        nacionalidade: type === "PF" ? nacionalidade : null, estado_civil: type === "PF" ? estadoCivil : null,
+        profissao: type === "PF" ? profissao : null, representante_legal: type === "PJ" ? representanteLegal : null,
+        address, email, phone,
+        doc_identidade_path: docIdentidadePath, comprovante_residencia_path: comprovanteResidenciaPath,
+        cartao_cnpj_path: cartaoCnpjPath, contrato_social_path: contratoSocialPath,
+      }]);
+      if (insertError) throw new Error(insertError.message);
+      setDone(true);
+    } catch (e) {
+      setError(e.message || "Não foi possível enviar o cadastro. Tente novamente.");
+    }
+    setBusy(false);
+  };
+
+  if (done) {
+    return (
+      <div style={{ minHeight: "100vh", background: NAVY, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ background: CREAM, borderRadius: 10, padding: "40px 32px", maxWidth: 420, textAlign: "center" }}>
+          <div style={{ marginBottom: 20 }}><Logo dark={false} /></div>
+          <h2 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 20, margin: "0 0 10px" }}>Cadastro enviado com sucesso!</h2>
+          <p style={{ color: MUTED, fontSize: 14 }}>Obrigado. Recebemos suas informações e documentos. Nossa equipe entrará em contato em breve.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const fileLabel = (f) => f ? f.name : "Nenhum arquivo selecionado";
+
+  return (
+    <div style={{ minHeight: "100vh", background: NAVY, padding: "32px 16px" }}>
+      <div style={{ background: CREAM, borderRadius: 10, padding: "32px 26px", maxWidth: 480, margin: "0 auto" }}>
+        <div style={{ marginBottom: 20 }}><Logo dark={false} /></div>
+        <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 20, margin: "0 0 6px", textAlign: "center" }}>Ficha de cadastro de cliente</h1>
+        <p style={{ color: MUTED, fontSize: 13, textAlign: "center", margin: "0 0 24px" }}>Preencha os dados abaixo e anexe os documentos solicitados.</p>
+
+        <Field label="Tipo">
+          <div style={{ display: "flex", gap: 8 }}>
+            {[{ v: "PF", l: "Pessoa física" }, { v: "PJ", l: "Pessoa jurídica" }].map((o) => (
+              <div key={o.v} onClick={() => setType(o.v)} style={{
+                flex: 1, textAlign: "center", padding: "10px 6px", borderRadius: 6, cursor: "pointer",
+                border: type === o.v ? "1.5px solid #B08D57" : "1px solid #E3E0D6",
+                background: type === o.v ? "rgba(176,141,87,0.1)" : "#fff",
+                fontSize: 13, color: type === o.v ? NAVY : MUTED,
+              }}>{o.l}</div>
+            ))}
+          </div>
+        </Field>
+
+        <Field label={type === "PJ" ? "Razão social" : "Nome completo"}><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label={type === "PJ" ? "CNPJ" : "CPF"}><input style={inputStyle} value={cpfCnpj} onChange={(e) => setCpfCnpj(e.target.value)} /></Field>
+
+        {type === "PF" ? (
+          <>
+            <Field label="RG"><input style={inputStyle} value={rg} onChange={(e) => setRg(e.target.value)} /></Field>
+            <Field label="Órgão expedidor do RG"><input style={inputStyle} value={orgaoExpedidorRg} onChange={(e) => setOrgaoExpedidorRg(e.target.value)} placeholder="Ex: SSP/SP" /></Field>
+            <Field label="Nacionalidade"><input style={inputStyle} value={nacionalidade} onChange={(e) => setNacionalidade(e.target.value)} /></Field>
+            <Field label="Estado civil"><input style={inputStyle} value={estadoCivil} onChange={(e) => setEstadoCivil(e.target.value)} placeholder="Ex: casado(a)" /></Field>
+            <Field label="Profissão"><input style={inputStyle} value={profissao} onChange={(e) => setProfissao(e.target.value)} /></Field>
+          </>
+        ) : (
+          <Field label="Representante legal (nome e qualificação)"><input style={inputStyle} value={representanteLegal} onChange={(e) => setRepresentanteLegal(e.target.value)} /></Field>
+        )}
+
+        <Field label="Endereço completo"><input style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Rua, número, bairro, cidade – UF, CEP" /></Field>
+        <Field label="E-mail"><input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label="Telefone / WhatsApp"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+
+        <div style={{ height: 1, background: "#E3E0D6", margin: "18px 0" }} />
+        <div style={{ fontSize: 13, fontWeight: 600, color: NAVY, marginBottom: 12 }}>Documentos (fotos ou PDF)</div>
+
+        {type === "PF" ? (
+          <Field label="Documento de identidade (RG ou CNH)">
+            <input type="file" accept="image/*,.pdf" onChange={(e) => setDocIdentidade(e.target.files[0])} style={{ fontSize: 12.5 }} />
+          </Field>
+        ) : (
+          <>
+            <Field label="Cartão CNPJ">
+              <input type="file" accept="image/*,.pdf" onChange={(e) => setCartaoCnpj(e.target.files[0])} style={{ fontSize: 12.5 }} />
+            </Field>
+            <Field label="Contrato social (última alteração consolidada)">
+              <input type="file" accept="image/*,.pdf" onChange={(e) => setContratoSocial(e.target.files[0])} style={{ fontSize: 12.5 }} />
+            </Field>
+          </>
+        )}
+        <Field label="Comprovante de residência">
+          <input type="file" accept="image/*,.pdf" onChange={(e) => setComprovanteResidencia(e.target.files[0])} style={{ fontSize: 12.5 }} />
+        </Field>
+
+        {error && <div style={{ color: "#993D1D", fontSize: 12.5, margin: "10px 0" }}>{error}</div>}
+        <button onClick={submit} disabled={busy} style={{ width: "100%", background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "12px 16px", fontSize: 14, cursor: "pointer", marginTop: 10 }}>
+          {busy ? "Enviando…" : "Enviar cadastro"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ClientPortalView({ data, onExit }) {
   const [viewCaseId, setViewCaseId] = useState(null);
   const { client, cases, events, documents } = data;
@@ -2241,6 +2448,7 @@ export default function RSACApp() {
   const [folderCaseId, setFolderCaseId] = useState(null);
   const [financeContext, setFinanceContext] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
+  const [prefillClient, setPrefillClient] = useState(null);
   const [editingCase, setEditingCase] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
   const [editingFinance, setEditingFinance] = useState(null);
@@ -2398,6 +2606,16 @@ export default function RSACApp() {
   }, [tasks]);
 
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
+  const useSubmission = (i) => {
+    setPrefillClient({
+      name: i.name, type: i.type, cpfCnpj: i.cpf_cnpj, rg: i.rg, orgaoExpedidorRg: i.orgao_expedidor_rg,
+      nacionalidade: i.nacionalidade, estadoCivil: i.estado_civil, profissao: i.profissao,
+      representanteLegal: i.representante_legal, address: i.address, email: i.email, phone: i.phone,
+      contactType: "Cliente",
+    });
+    setEditingClient(null);
+    setModal("client");
+  };
 
   const openTasks = tasks.filter((t) => !t.done).length;
   const activeCases = cases.filter((c) => c.status === "Ativo").length;
@@ -2415,6 +2633,7 @@ export default function RSACApp() {
   const SECONDARY_NAV = [
     { id: "clients", label: "Contatos", icon: Users },
     { id: "cases", label: "Todos os casos", icon: Briefcase },
+    { id: "intake", label: "Cadastros pendentes", icon: CheckSquare },
     ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
   ];
   const activeCasesList = cases
@@ -2462,6 +2681,10 @@ export default function RSACApp() {
     setMonthlyGoal(value);
     await supabase.from("finance_settings").update({ monthly_goal: value }).eq("id", 1);
   };
+
+  if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("cadastro") === "1") {
+    return <IntakeForm />;
+  }
 
   if (portalData) {
     return <ClientPortalView data={portalData} onExit={() => setPortalData(null)} />;
@@ -2557,12 +2780,18 @@ export default function RSACApp() {
                 )}
               </div>
             )}
+            {mobileTab === "intake" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                <IntakeReviewTab onUseSubmission={useSubmission} />
+              </div>
+            )}
+
             {mobileTab === "newsletter" && role === "admin" && (
               <div style={{ padding: "16px 18px 100px" }}>
                 <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
               </div>
             )}
-            <MobileBottomNav active={mobileTab === "clients" || mobileTab === "finance" || mobileTab === "newsletter" ? "more" : mobileTab}
+            <MobileBottomNav active={["clients", "finance", "newsletter", "intake"].includes(mobileTab) ? "more" : mobileTab}
               onNavigate={(id) => { if (id === "more") setMobileMoreOpen(true); else goToTab(id); }}
               onAdd={floatingAddAction || (() => {})}
               hasTodayAlertByTab={hasTodayAlertByTab} />
@@ -2576,11 +2805,11 @@ export default function RSACApp() {
         )}
 
         {modal && (
-          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases}
+          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases} prefill={prefillClient}
             editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
             taskCaseId={folderCaseId}
             financeContext={financeContext}
-            onAddClient={(v) => { addRow("clients", v); setModal(null); }}
+            onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
             onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
             onAddCase={(v) => { addRow("cases", v); setModal(null); }}
             onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
@@ -2972,6 +3201,10 @@ export default function RSACApp() {
             clientName={clientName} />
         )}
 
+        {tab === "intake" && (
+          <IntakeReviewTab onUseSubmission={useSubmission} />
+        )}
+
         {tab === "newsletter" && role === "admin" && (
           <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
         )}
@@ -2980,11 +3213,11 @@ export default function RSACApp() {
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases} prefill={prefillClient}
           editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
           taskCaseId={folderCaseId}
           financeContext={financeContext}
-          onAddClient={(v) => { addRow("clients", v); setModal(null); }}
+          onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
           onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
           onAddCase={(v) => { addRow("cases", v); setModal(null); }}
           onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
