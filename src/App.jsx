@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
+import PizZip from "pizzip";
+import Docxtemplater from "docxtemplater";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
   Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check
@@ -43,6 +45,43 @@ async function fetchGoogleEvents(accessToken, monthDate) {
   }));
 }
 
+const SUPABASE_STORAGE_BASE = "https://jrcojsnjxuykdczbqfuo.supabase.co/storage/v1/object/public/newsletter-assets";
+
+async function generateProcuracao(client, extra) {
+  const isPJ = client.type === "PJ";
+  const templateUrl = `${SUPABASE_STORAGE_BASE}/${isPJ ? "template_procuracao_pj.docx" : "template_procuracao_pf.docx"}`;
+  const resp = await fetch(templateUrl);
+  if (!resp.ok) throw new Error("Não foi possível baixar o modelo de procuração. Confira se ele foi enviado ao Storage.");
+  const arrayBuffer = await resp.arrayBuffer();
+  const zip = new PizZip(arrayBuffer);
+  const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => "" });
+
+  const data = isPJ
+    ? {
+        nome: client.name, cnpj: client.cpfCnpj || "", endereco: client.address || "",
+        representante: client.representanteLegal || "",
+        cidade: extra.cidade, dia: extra.dia, mes: extra.mes, ano: extra.ano,
+        nome_assinatura: client.name,
+      }
+    : {
+        nome: client.name, nacionalidade: client.nacionalidade || "", estado_civil: client.estadoCivil || "",
+        profissao: client.profissao || "", rg: client.rg || "", orgao_expedidor: client.orgaoExpedidorRg || "",
+        cpf: client.cpfCnpj || "", endereco: client.address || "",
+        cidade: extra.cidade, dia: extra.dia, mes: extra.mes, ano: extra.ano,
+        nome_assinatura: client.name,
+      };
+
+  doc.render(data);
+  const out = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  const url = URL.createObjectURL(out);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Procuracao_${client.name.replace(/[^\p{L}\p{N}]+/gu, "_")}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 async function pushEventToGoogle(accessToken, appt, silent) {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
@@ -93,7 +132,7 @@ const STATUS_COLORS = {
 };
 
 // camelCase (JS) <-> snake_case (Postgres)
-const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code });
+const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code, nacionalidade: r.nacionalidade, estadoCivil: r.estado_civil, profissao: r.profissao, orgaoExpedidorRg: r.orgao_expedidor_rg, representanteLegal: r.representante_legal });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
@@ -139,7 +178,7 @@ async function loadAll() {
 }
 
 function toPayload(key, row) {
-  if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null };
+  if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null, nacionalidade: row.nacionalidade || null, estado_civil: row.estadoCivil || null, profissao: row.profissao || null, orgao_expedidor_rg: row.orgaoExpedidorRg || null, representante_legal: row.representanteLegal || null };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
@@ -352,11 +391,11 @@ function Empty({ text }) {
   return <p style={{ fontSize: 13.5, color: MUTED, background: "#fff", border: "1px dashed #DDD8C9", borderRadius: 8, padding: 20, textAlign: "center" }}>{text}</p>;
 }
 
-function SubmitRow({ onClose, onSubmit }) {
+function SubmitRow({ onClose, onSubmit, submitLabel }) {
   return (
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
       <button onClick={onClose} style={{ background: "none", border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 16px", fontSize: 13, cursor: "pointer", color: MUTED }}>Cancelar</button>
-      <button onClick={onSubmit} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>Salvar</button>
+      <button onClick={onSubmit} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>{submitLabel || "Salvar"}</button>
     </div>
   );
 }
@@ -370,6 +409,11 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
     const [cpfCnpj, setCpfCnpj] = useState(editing?.cpfCnpj || ""); const [rg, setRg] = useState(editing?.rg || "");
     const [contactType, setContactType] = useState(editing?.contactType || "Cliente");
     const [address, setAddress] = useState(editing?.address || "");
+    const [nacionalidade, setNacionalidade] = useState(editing?.nacionalidade || "brasileiro(a)");
+    const [estadoCivil, setEstadoCivil] = useState(editing?.estadoCivil || "");
+    const [profissao, setProfissao] = useState(editing?.profissao || "");
+    const [orgaoExpedidorRg, setOrgaoExpedidorRg] = useState(editing?.orgaoExpedidorRg || "");
+    const [representanteLegal, setRepresentanteLegal] = useState(editing?.representanteLegal || "");
     return (
       <Modal title={editing ? "Editar contato" : "Novo contato"} onClose={onClose}>
         <Field label="Nome"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo ou razão social" /></Field>
@@ -389,8 +433,16 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
         <Field label={type === "PJ" ? "CNPJ" : "CPF"}>
           <input style={inputStyle} value={cpfCnpj} onChange={(e) => setCpfCnpj(e.target.value)} placeholder={type === "PJ" ? "00.000.000/0000-00" : "000.000.000-00"} />
         </Field>
-        {type === "PF" && (
-          <Field label="RG"><input style={inputStyle} value={rg} onChange={(e) => setRg(e.target.value)} placeholder="00.000.000-0" /></Field>
+        {type === "PF" ? (
+          <>
+            <Field label="RG"><input style={inputStyle} value={rg} onChange={(e) => setRg(e.target.value)} placeholder="00.000.000-0" /></Field>
+            <Field label="Órgão expedidor do RG"><input style={inputStyle} value={orgaoExpedidorRg} onChange={(e) => setOrgaoExpedidorRg(e.target.value)} placeholder="Ex: SSP/SP" /></Field>
+            <Field label="Nacionalidade"><input style={inputStyle} value={nacionalidade} onChange={(e) => setNacionalidade(e.target.value)} placeholder="Ex: brasileiro(a)" /></Field>
+            <Field label="Estado civil"><input style={inputStyle} value={estadoCivil} onChange={(e) => setEstadoCivil(e.target.value)} placeholder="Ex: casado(a)" /></Field>
+            <Field label="Profissão"><input style={inputStyle} value={profissao} onChange={(e) => setProfissao(e.target.value)} placeholder="Ex: empresário(a)" /></Field>
+          </>
+        ) : (
+          <Field label="Representante legal"><input style={inputStyle} value={representanteLegal} onChange={(e) => setRepresentanteLegal(e.target.value)} placeholder="Nome e qualificação do representante" /></Field>
         )}
         <Field label="E-mail"><input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nome@exemplo.com" /></Field>
         <Field label="Telefone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(11) 90000-0000" /></Field>
@@ -398,7 +450,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, taskCaseId, financ
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!name.trim()) { setError("Informe o nome do cliente."); return; }
-          const values = { name: name.trim(), type, email, phone, cpfCnpj, rg: type === "PF" ? rg : "", contactType, address };
+          const values = { name: name.trim(), type, email, phone, cpfCnpj, rg: type === "PF" ? rg : "", contactType, address, nacionalidade, estadoCivil, profissao, orgaoExpedidorRg, representanteLegal };
           if (editing) onEditClient(editing.id, values); else onAddClient(values);
         }} />
       </Modal>
@@ -783,6 +835,23 @@ function ClientFolder({ client, cases, finance, precedents, onBack, onEdit, onDe
   const myPrecedents = (precedents || []).filter((p) => p.judgeId === client.id);
   const optedIn = client.newsletterOptIn !== false;
   const isJudge = client.contactType === "Juiz";
+  const [showProcuracao, setShowProcuracao] = useState(false);
+  const [procCidade, setProcCidade] = useState("São Paulo");
+  const [procData, setProcData] = useState(todayISO());
+  const [procBusy, setProcBusy] = useState(false);
+  const [procError, setProcError] = useState("");
+  const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const gerarProcuracao = async () => {
+    setProcBusy(true); setProcError("");
+    try {
+      const d = new Date(procData + "T00:00:00");
+      await generateProcuracao(client, { cidade: procCidade, dia: String(d.getDate()), mes: MESES[d.getMonth()], ano: String(d.getFullYear()) });
+      setShowProcuracao(false);
+    } catch (e) {
+      setProcError(e.message || "Não foi possível gerar a procuração.");
+    }
+    setProcBusy(false);
+  };
   return (
     <>
       <DetailHeader onBack={onBack} title={client.name}
@@ -798,6 +867,13 @@ function ClientFolder({ client, cases, finance, precedents, onBack, onEdit, onDe
         <InfoRow label="Telefone" value={client.phone} />
         <InfoRow label="Endereço" value={client.address} />
       </SectionCard>
+      {!isJudge && (
+        <SectionCard title="Documentos">
+          <button onClick={() => setShowProcuracao(true)} style={{ background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 14px", fontSize: 13, color: NAVY, cursor: "pointer" }}>
+            Criar procuração (Word)
+          </button>
+        </SectionCard>
+      )}
       {client.contactType === "Cliente" && (
         <SectionCard title="Portal do cliente">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -863,6 +939,14 @@ function ClientFolder({ client, cases, finance, precedents, onBack, onEdit, onDe
             ))}
           </SectionCard>
         </>
+      )}
+      {showProcuracao && (
+        <Modal title={`Criar procuração — ${client.name}`} onClose={() => setShowProcuracao(false)}>
+          <Field label="Cidade"><input style={inputStyle} value={procCidade} onChange={(e) => setProcCidade(e.target.value)} placeholder="São Paulo" /></Field>
+          <Field label="Data"><input type="date" style={inputStyle} value={procData} onChange={(e) => setProcData(e.target.value)} /></Field>
+          {procError && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{procError}</div>}
+          <SubmitRow onClose={() => setShowProcuracao(false)} onSubmit={gerarProcuracao} submitLabel={procBusy ? "Gerando…" : "Gerar Word"} />
+        </Modal>
       )}
     </>
   );

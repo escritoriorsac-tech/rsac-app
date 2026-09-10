@@ -12,7 +12,9 @@
     "lucide-react": "^0.383.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "@supabase/supabase-js": "^2.45.0"
+    "@supabase/supabase-js": "^2.45.0",
+    "docxtemplater": "^3.50.0",
+    "pizzip": "^3.1.7"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
