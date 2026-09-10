@@ -920,7 +920,7 @@ function Timeline({ events, onDelete }) {
   );
 }
 
-function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo, variant }) {
+function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo, variant, checkboxSize }) {
   const d = daysUntil(t.dueDate);
   const overdue = d !== null && d < 0 && !t.done;
   const dueToday = d === 0 && !t.done;
@@ -939,12 +939,12 @@ function TaskRow({ t, onToggle, onDelete, onEdit, showDueInfo, variant }) {
     <div style={isCard ? { display: "flex", alignItems: "center", gap: 14 } : { padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
       <div style={{ display: "flex", alignItems: "center", gap: isCard ? 14 : 10, width: "100%" }}>
         <div onClick={() => onToggle(t.id)} style={{
-          width: isCard ? 17 : 15, height: isCard ? 17 : 15, borderRadius: isCard ? 3 : "50%", flexShrink: 0, cursor: "pointer",
+          width: checkboxSize || (isCard ? 17 : 15), height: checkboxSize || (isCard ? 17 : 15), borderRadius: isCard ? (checkboxSize >= 20 ? 4 : 3) : "50%", flexShrink: 0, cursor: "pointer",
           border: t.done ? "none" : `1.5px solid ${isCard ? ICON_INACTIVE : "#B8B0A0"}`,
           background: t.done ? SIDEBAR_NAVY : "#fff",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          {t.done && <Check size={isCard ? 12 : 10} color="#f5efe4" strokeWidth={3} />}
+          {t.done && <Check size={checkboxSize ? checkboxSize - 6 : isCard ? 12 : 10} color="#f5efe4" strokeWidth={3} />}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: isCard ? 16 : 13, textDecoration: t.done ? "line-through" : "none", color: t.done ? TEXT_META : TEXT_PRIMARY }}>
@@ -1012,6 +1012,366 @@ function caseDeadlineInfo(caseItem, tasks) {
     : status === "today" ? "1 prazo hoje"
     : `${openTasks.length} tarefa(s) · prazo em ${d}d`;
   return { openTaskCount: openTasks.length, status, label, nextDueDate: next.dueDate };
+}
+
+function MobileBottomNav({ active, onNavigate, onAdd, hasTodayAlertByTab }) {
+  const ITEMS = [
+    { id: "cases", label: "Casos", icon: Briefcase },
+    { id: "tasks", label: "Tarefas", icon: CheckSquare },
+    { id: "calendar", label: "Agenda", icon: CalendarIcon },
+    { id: "more", label: "Mais", icon: Users },
+  ];
+  return (
+    <>
+      <button onClick={onAdd} style={{
+        position: "fixed", right: 20, bottom: 74 + 22, width: 56, height: 56, borderRadius: 28,
+        background: GOLD_ACCENT, color: SIDEBAR_NAVY, border: "none", fontSize: 28, lineHeight: 1,
+        boxShadow: "0 8px 20px rgba(18,40,63,0.28)", zIndex: 40, cursor: "pointer",
+      }}>+</button>
+      <div style={{
+        position: "fixed", left: 0, right: 0, bottom: 0, background: SIDEBAR_NAVY,
+        padding: "10px 8px 22px", display: "flex", justifyContent: "space-around", alignItems: "flex-end", zIndex: 30,
+      }}>
+        {ITEMS.map((it) => {
+          const isActive = active === it.id;
+          const Icon = it.icon;
+          return (
+            <button key={it.id} onClick={() => onNavigate(it.id)} style={{
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+              padding: "6px 14px", minWidth: 64, background: "none", border: "none", cursor: "pointer",
+            }}>
+              <div style={{ position: "relative" }}>
+                <Icon size={20} color={isActive ? GOLD_ACCENT : "rgba(240,234,221,0.7)"} />
+                {hasTodayAlertByTab?.[it.id] && (
+                  <div style={{ position: "absolute", top: -3, right: -5, width: 8, height: 8, borderRadius: 4, background: ALERT_ON_NAVY }} />
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: isActive ? GOLD_ACCENT : "rgba(240,234,221,0.7)", fontWeight: isActive ? 700 : 400 }}>{it.label}</div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
+  const items = [
+    { id: "finance", label: "Financeiro", icon: Wallet },
+    { id: "clients", label: "Contatos", icon: Users },
+    ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
+  ];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(18,40,63,0.4)", zIndex: 50, display: "flex", alignItems: "flex-end" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "16px 16px 0 0", padding: "20px 8px 28px" }}>
+        <div style={{ width: 36, height: 4, background: "#e6e0d2", borderRadius: 2, margin: "0 auto 18px" }} />
+        {items.map((it) => (
+          <button key={it.id} onClick={() => onNavigate(it.id)} style={{
+            display: "flex", alignItems: "center", gap: 14, width: "100%", background: "none", border: "none",
+            padding: "14px 16px", fontSize: 16, color: TEXT_PRIMARY, cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+          }}>
+            <it.icon size={19} color={TEXT_SECONDARY} /> {it.label}
+          </button>
+        ))}
+        <div style={{ height: 1, background: "#f1ede2", margin: "6px 16px" }} />
+        <div style={{ padding: "10px 16px", fontSize: 12.5, color: TEXT_META }}>{userEmail}</div>
+        <button onClick={onSignOut} style={{
+          display: "flex", alignItems: "center", gap: 14, width: "100%", background: "none", border: "none",
+          padding: "14px 16px", fontSize: 16, color: ALERT_ON_LIGHT, cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+        }}>
+          <LogOut size={19} /> Sair
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MobileCasosScreen({ cases, tasks, search, onSearchChange, onOpenCase }) {
+  const activeCasesList = cases
+    .filter((c) => c.status === "Ativo")
+    .map((c) => ({ ...c, deadline: caseDeadlineInfo(c, tasks) }))
+    .filter((c) => !search.trim() || c.title.toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((a, b) => {
+      const order = { overdue: 0, today: 1, upcoming: 2, none: 3 };
+      const byStatus = order[a.deadline.status] - order[b.deadline.status];
+      if (byStatus !== 0) return byStatus;
+      if (a.deadline.nextDueDate && b.deadline.nextDueDate) return a.deadline.nextDueDate.localeCompare(b.deadline.nextDueDate);
+      if (a.deadline.nextDueDate) return -1;
+      if (b.deadline.nextDueDate) return 1;
+      return (a.title || "").localeCompare(b.title || "", "pt-BR");
+    });
+
+  const todayItem = activeCasesList.find((c) => c.deadline.status === "today");
+
+  return (
+    <div style={{ paddingBottom: 110 }}>
+      <div style={{ background: SIDEBAR_NAVY, padding: "18px 18px 16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "Georgia, serif", fontSize: 20, letterSpacing: "0.3em", color: "#f0eadd" }}>RSAC</div>
+          <div style={{ width: 34, height: 34, borderRadius: 17, background: "rgba(240,234,221,0.15)" }} />
+        </div>
+        <input value={search} onChange={(e) => onSearchChange(e.target.value)} placeholder="Buscar caso…" style={{
+          width: "100%", boxSizing: "border-box", background: "rgba(240,234,221,0.12)", border: "1px solid rgba(240,234,221,0.2)",
+          borderRadius: 8, padding: "11px 14px", fontSize: 15, color: "#f5efe4", outline: "none",
+        }} />
+      </div>
+
+      <div style={{ padding: "16px 18px" }}>
+        {todayItem && (
+          <div onClick={() => onOpenCase(todayItem.id)} style={{ background: "#fdf3f0", border: "1px solid #eccfc8", borderRadius: 10, padding: "14px 16px", marginBottom: 16, cursor: "pointer" }}>
+            <div style={{ fontSize: 11, letterSpacing: "0.12em", fontWeight: 700, color: ALERT_ON_LIGHT, marginBottom: 4 }}>HOJE</div>
+            <div style={{ fontSize: 16, color: TEXT_PRIMARY }}>{todayItem.title} — {todayItem.deadline.label}</div>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+          <div style={{ fontFamily: "Georgia, serif", fontSize: 30, color: SIDEBAR_NAVY }}>Casos</div>
+          <div style={{ fontSize: 14, color: GOLD_DARK }}>Ativos ⌄</div>
+        </div>
+        {activeCasesList.length === 0 && <p style={{ fontSize: 14, color: TEXT_META, textAlign: "center", padding: "20px 0" }}>Nenhum caso encontrado.</p>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {activeCasesList.map((c) => {
+            const borderColor = c.deadline.status === "overdue" || c.deadline.status === "today" ? ALERT_ON_LIGHT
+              : c.deadline.status === "upcoming" ? GOLD_ACCENT : "transparent";
+            const statusColor = c.deadline.status === "overdue" || c.deadline.status === "today" ? ALERT_ON_LIGHT
+              : c.deadline.status === "upcoming" ? GOLD_DARK : TEXT_META;
+            return (
+              <div key={c.id} onClick={() => onOpenCase(c.id)} style={{
+                background: "#fff", border: `1px solid ${CARD_BORDER}`, borderLeft: `3px solid ${borderColor}`,
+                borderRadius: 8, padding: 16, display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 16, lineHeight: 1.3, color: TEXT_PRIMARY }}>{c.title}</div>
+                  <div style={{ fontSize: 13, fontWeight: c.deadline.status === "none" ? 400 : 600, color: statusColor, marginTop: 3 }}>{c.deadline.label}</div>
+                </div>
+                <span style={{ color: ICON_INACTIVE, fontSize: 20 }}>›</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileCaseScreen({
+  item, client, clients, events, tasks, notes, documents, finance,
+  onBack, onEdit, onOpenClient, onOpenJudge,
+  onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask, onEditTask,
+  onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
+}) {
+  const [wsTab, setWsTab] = useState("tarefas");
+  const judge = clients.find((c) => c.id === item.judgeId);
+  const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
+  const caseTasks = tasks.filter((t) => t.caseId === item.id);
+  const openTaskCount = caseTasks.filter((t) => !t.done).length;
+  const caseNotes = notes.filter((n) => n.caseId === item.id);
+  const caseDocs = documents.filter((d) => d.caseId === item.id);
+  const caseFinance = (finance || []).filter((f) => f.caseId === item.id);
+  const caseExpenses = caseFinance.filter((f) => f.type === "Despesa");
+  const casePayments = caseFinance.filter((f) => f.type === "Receita");
+
+  const TABS = [
+    { id: "tarefas", label: "Tarefas", count: openTaskCount },
+    { id: "prazos", label: "Prazos", count: caseEvents.length },
+    { id: "documentos", label: "Documentos", count: caseDocs.length + caseNotes.length },
+    { id: "financeiro", label: "Financeiro", count: caseFinance.length },
+    { id: "contatos", label: "Contatos", count: 0 },
+  ];
+  const footerLabel = {
+    tarefas: "+ Nova tarefa neste caso", prazos: "+ Adicionar evento", documentos: "+ Adicionar documento",
+    financeiro: "+ Adicionar lançamento", contatos: null,
+  }[wsTab];
+  const footerAction = {
+    tarefas: onAddTask, prazos: onAddEvent, documentos: onAddDoc, financeiro: onAddExpense, contatos: null,
+  }[wsTab];
+
+  const openTasks = caseTasks.filter((t) => !t.done).sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999"));
+  const doneTasks = caseTasks.filter((t) => t.done);
+
+  return (
+    <div style={{ paddingBottom: footerAction ? 90 : 20 }}>
+      <div style={{ background: SIDEBAR_NAVY, padding: "16px 18px 0", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "rgba(240,234,221,0.8)", fontSize: 15, cursor: "pointer", padding: 0 }}>‹ Casos</button>
+          <button onClick={onEdit} style={{ background: "none", border: "none", color: "rgba(240,234,221,0.8)", fontSize: 15, cursor: "pointer", padding: 0 }}>⋯</button>
+        </div>
+        <div style={{ fontSize: 10, letterSpacing: "0.14em", fontWeight: 700, color: GOLD_ACCENT, marginBottom: 4 }}>
+          CASO · {item.caseType === "Judicial" ? "PROCESSO JUDICIAL" : "CONSULTORIA"}
+        </div>
+        <div style={{ fontFamily: "Georgia, serif", fontSize: 26, lineHeight: 1.2, color: "#f5efe4", marginBottom: 12, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.title}</div>
+        <div style={{ display: "flex", gap: 22, overflowX: "auto", paddingTop: 13, paddingBottom: 13, borderTop: "1px solid rgba(232,226,213,0.12)", whiteSpace: "nowrap" }}>
+          {TABS.map((t) => {
+            const active = wsTab === t.id;
+            return (
+              <div key={t.id} onClick={() => setWsTab(t.id)} style={{
+                fontSize: 15, cursor: "pointer", flexShrink: 0,
+                color: active ? "#f5efe4" : "rgba(240,234,221,0.65)", fontWeight: active ? 700 : 400,
+                borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent", paddingBottom: 4,
+              }}>
+                {t.label}{t.count > 0 ? ` ${t.count}` : ""}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ padding: "18px 18px 0" }}>
+        {wsTab === "tarefas" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {caseTasks.length === 0 && <p style={{ fontSize: 15, color: TEXT_META, textAlign: "center", padding: "30px 0" }}>Nenhuma tarefa neste caso.</p>}
+            {openTasks.map((t) => (
+              <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px" }}>
+                <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" checkboxSize={22} />
+              </div>
+            ))}
+            {doneTasks.length > 0 && (
+              <>
+                <div style={{ fontSize: 11, letterSpacing: 1, color: TEXT_META, textTransform: "uppercase", margin: "10px 0 0" }}>Concluídas</div>
+                {doneTasks.map((t) => (
+                  <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px", opacity: 0.72 }}>
+                    <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" checkboxSize={22} />
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+
+        {wsTab === "prazos" && (
+          <>
+            <SectionCard title="Dados processuais">
+              <InfoRow label="Número" value={item.number} />
+              <InfoRow label="Área" value={item.area} />
+              {item.caseType === "Judicial" && <>
+                <InfoRow label="Tribunal" value={item.tribunal} />
+                <InfoRow label="Comarca" value={item.comarca} />
+                <InfoRow label="Vara" value={item.vara} />
+                <InfoRow label="Valor da causa" value={item.valorCausa ? fmtBRL(item.valorCausa) : null} />
+              </>}
+            </SectionCard>
+            <SectionCard title="Andamento processual">
+              <Timeline events={caseEvents} onDelete={onDeleteEvent} />
+            </SectionCard>
+          </>
+        )}
+
+        {wsTab === "documentos" && (
+          <>
+            <SectionCard title="Banco de petições">
+              {caseDocs.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum documento referenciado ainda.</p>}
+              {caseDocs.map((d) => (
+                <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                  <div style={{ fontSize: 13, color: INK }}>{d.name}</div>
+                  {d.driveLink && <a href={d.driveLink} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: SIDEBAR_NAVY }}>Abrir ↗</a>}
+                </div>
+              ))}
+            </SectionCard>
+            <SectionCard title="Anotações">
+              {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+              {caseNotes.map((n) => (
+                <div key={n.id} style={{ padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                  <div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div>
+                  <div style={{ fontSize: 13, color: INK }}>{n.content}</div>
+                </div>
+              ))}
+            </SectionCard>
+          </>
+        )}
+
+        {wsTab === "financeiro" && (
+          <>
+            <SectionCard title="Despesas processuais">
+              {caseExpenses.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma despesa registrada.</p>}
+              {caseExpenses.map((f) => (
+                <RowCard key={f.id} title={f.description} subtitle={fmtDate(f.date)} onDelete={() => onDeleteFinance(f.id)}
+                  right={<span style={{ color: "#993D1D", fontSize: 13.5, fontWeight: 500 }}>-{fmtBRL(f.amount)}</span>} />
+              ))}
+            </SectionCard>
+            <SectionCard title="Pagamentos do cliente">
+              {casePayments.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum pagamento registrado.</p>}
+              {casePayments.map((f) => (
+                <RowCard key={f.id} title={f.description} subtitle={fmtDate(f.date)} onDelete={() => onDeleteFinance(f.id)}
+                  right={<span style={{ color: "#27500A", fontSize: 13.5, fontWeight: 500 }}>+{fmtBRL(f.amount)}</span>} />
+              ))}
+            </SectionCard>
+          </>
+        )}
+
+        {wsTab === "contatos" && (
+          <>
+            <SectionCard title="Cliente">
+              {client ? <RowCard onClick={() => onOpenClient(client)} title={client.name} subtitle={client.email || "sem e-mail"} /> : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum cliente vinculado.</p>}
+            </SectionCard>
+            {item.caseType === "Judicial" && (
+              <SectionCard title="Juiz e gabinete">
+                {judge ? (
+                  <>
+                    <RowCard onClick={() => onOpenJudge(judge)} title={judge.name} subtitle={judge.address || "Ver cadastro completo"} />
+                    <div style={{ marginTop: 10 }}><InfoRowEmail label="E-mail" value={judge.email} /><InfoRow label="Telefone" value={judge.phone} /></div>
+                  </>
+                ) : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum juiz vinculado.</p>}
+              </SectionCard>
+            )}
+          </>
+        )}
+      </div>
+
+      {footerAction && (
+        <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, padding: 16, background: "#fff", borderTop: `1px solid ${CARD_BORDER}` }}>
+          <button onClick={footerAction} style={{ width: "100%", background: SIDEBAR_NAVY, color: "#f5efe4", fontSize: 16, fontWeight: 600, padding: 15, borderRadius: 8, border: "none", cursor: "pointer" }}>{footerLabel}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileTasksScreen({ tasks, cases, onToggle, onDelete, onEdit, onOpenCase }) {
+  const [filter, setFilter] = useState("abertas");
+  const todayStr = todayISO();
+  let visible = tasks;
+  if (filter === "hoje") visible = tasks.filter((t) => t.dueDate === todayStr && !t.done);
+  else if (filter === "abertas") visible = tasks.filter((t) => !t.done);
+  else if (filter === "semcaso") visible = tasks.filter((t) => !t.caseId);
+
+  const CHIPS = [{ id: "hoje", label: "Hoje" }, { id: "abertas", label: "Abertas" }, { id: "semcaso", label: "Sem caso" }];
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      <div style={{ background: SIDEBAR_NAVY, padding: "18px 18px 16px" }}>
+        <div style={{ fontFamily: "Georgia, serif", fontSize: 28, color: "#f5efe4", marginBottom: 14 }}>Tarefas</div>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+          {CHIPS.map((c) => {
+            const active = filter === c.id;
+            return (
+              <div key={c.id} onClick={() => setFilter(c.id)} style={{
+                flexShrink: 0, padding: "8px 14px", borderRadius: 20, fontSize: 13, cursor: "pointer",
+                background: active ? GOLD_ACCENT : "transparent", color: active ? SIDEBAR_NAVY : "rgba(240,234,221,0.8)",
+                fontWeight: active ? 700 : 400, border: active ? "none" : "1px solid rgba(240,234,221,0.28)",
+              }}>{c.label}</div>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {visible.length === 0 && <p style={{ fontSize: 14, color: TEXT_META, textAlign: "center", padding: "20px 0" }}>Nenhuma tarefa aqui.</p>}
+        {visible.map((t) => {
+          const c = cases.find((cs) => cs.id === t.caseId);
+          return (
+            <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px" }}>
+              <TaskRow t={t} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} showDueInfo variant="card" checkboxSize={22} />
+              <div style={{ marginLeft: 31, marginTop: 6 }}>
+                {c ? (
+                  <span onClick={() => onOpenCase(c.id)} style={{ fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>{c.title} ›</span>
+                ) : (
+                  <span style={{ fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>Vincular a um caso ›</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function CaseWorkspace({
@@ -1779,6 +2139,9 @@ export default function RSACApp() {
   const [session, setSession] = useState(undefined);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [mobileTaskFilter, setMobileTaskFilter] = useState("abertas");
   const [clients, setClients] = useState([]);
   const [cases, setCases] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -1810,6 +2173,12 @@ export default function RSACApp() {
   const [role, setRole] = useState(null);
   const [newsletters, setNewsletters] = useState([]);
   const [portalData, setPortalData] = useState(null);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -2019,6 +2388,134 @@ export default function RSACApp() {
   }
   if (!session) return <LoginScreen onClientPortalAccess={setPortalData} />;
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: MUTED, fontFamily: "Georgia, serif" }}>Carregando RSAC…</div>;
+
+  if (isMobile) {
+    const mobileTab = tab === "dashboard" ? "cases" : tab;
+    const wsCase = activeCaseId ? cases.find((c) => c.id === activeCaseId) : null;
+    const hasTodayAlertByTab = {
+      cases: cases.some((c) => c.status === "Ativo" && caseDeadlineInfo(c, tasks).status === "today"),
+      tasks: tasks.some((t) => !t.done && t.dueDate === todayISO()),
+    };
+    const floatingAddAction = {
+      cases: () => { setEditingCase(null); setModal("case"); },
+      tasks: () => { setEditingTask(null); setFolderCaseId(null); setModal("task"); },
+      calendar: () => setModal("appt"),
+    }[mobileTab];
+
+    return (
+      <div style={{ minHeight: "100vh", background: CONTENT_BG, fontFamily: "Arial, sans-serif" }}>
+        {wsCase ? (
+          <MobileCaseScreen item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
+            events={events} tasks={tasks} notes={notes} documents={documents} finance={finance}
+            onBack={() => setActiveCaseId(null)}
+            onEdit={() => { setEditingCase(wsCase); setModal("case"); }}
+            onOpenClient={(c) => { setActiveCaseId(null); setTab("clients"); setViewClient(c); }}
+            onOpenJudge={(j) => { setActiveCaseId(null); setTab("clients"); setViewClient(j); }}
+            onAddEvent={() => { setFolderCaseId(wsCase.id); setModal("event"); }}
+            onDeleteEvent={(id) => removeRow("events", id)}
+            onToggleTask={toggleTask}
+            onDeleteTask={(id) => removeRow("tasks", id)}
+            onAddTask={() => { setFolderCaseId(wsCase.id); setModal("task"); }}
+            onEditTask={(t) => { setEditingTask(t); setModal("task"); }}
+            onAddNote={() => { setFolderCaseId(wsCase.id); setModal("note"); }}
+            onDeleteNote={(id) => removeRow("notes", id)}
+            onAddDoc={() => { setFolderCaseId(wsCase.id); setModal("document"); }}
+            onDeleteDoc={(id) => removeRow("documents", id)}
+            onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
+            onAddPayment={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Receita" }); setModal("finance"); }}
+            onDeleteFinance={(id) => removeRow("finance", id)} />
+        ) : (
+          <>
+            {mobileTab === "cases" && (
+              <MobileCasosScreen cases={cases} tasks={tasks} search={search} onSearchChange={setSearch} onOpenCase={openCase} />
+            )}
+            {mobileTab === "tasks" && (
+              <MobileTasksScreen tasks={tasks} cases={cases} onToggle={toggleTask} onDelete={(id) => removeRow("tasks", id)}
+                onEdit={(t) => { setEditingTask(t); setModal("task"); }} onOpenCase={openCase} />
+            )}
+            {mobileTab === "calendar" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                <AgendaTab appts={appts} tasks={tasks}
+                  onDeleteAppt={(id) => removeRow("appts", id)}
+                  onDeleteTask={(id) => removeRow("tasks", id)}
+                  onAddAppt={() => setModal("appt")}
+                  onTokenAcquired={setGoogleToken}
+                  onSyncAll={syncAllAppts} />
+              </div>
+            )}
+            {mobileTab === "finance" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                <FinanceTab finance={finance} clients={clients} monthlyGoal={monthlyGoal} onSaveGoal={saveMonthlyGoal}
+                  onAdd={() => { setEditingFinance(null); setFinanceContext(null); setModal("finance"); }}
+                  onEdit={(f) => { setEditingFinance(f); setModal("finance"); }}
+                  onDelete={(id) => removeRow("finance", id)} clientName={clientName} />
+              </div>
+            )}
+            {mobileTab === "clients" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                {viewClient ? (
+                  <ClientFolder client={viewClient} cases={cases} finance={finance} precedents={precedents}
+                    onBack={() => setViewClient(null)}
+                    onEdit={() => { setEditingClient(viewClient); setModal("client"); }}
+                    onDelete={() => removeClientAndClose(viewClient.id)}
+                    onOpenCase={(c) => { setViewClient(null); openCase(c.id); }}
+                    onToggleOptIn={() => toggleOptIn(viewClient)}
+                    onAddPrecedent={() => { setFolderCaseId(viewClient.id); setModal("precedent"); }}
+                    onDeletePrecedent={(id) => removeRow("precedents", id)} />
+                ) : (
+                  <>
+                    <div style={{ fontFamily: "Georgia, serif", fontSize: 24, color: SIDEBAR_NAVY, marginBottom: 12 }}>Contatos</div>
+                    <SearchBar value={search} onChange={setSearch} placeholder="Buscar contato…" />
+                    {sortByName(clients.filter((c) => !search.trim() || [c.name, c.email, c.phone].filter(Boolean).some((f) => f.toLowerCase().includes(search.trim().toLowerCase())))).map((c) => (
+                      <RowCard key={c.id} onClick={() => setViewClient(c)} title={c.name} subtitle={c.contactType || "Cliente"} />
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+            {mobileTab === "newsletter" && role === "admin" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
+              </div>
+            )}
+            <MobileBottomNav active={mobileTab === "clients" || mobileTab === "finance" || mobileTab === "newsletter" ? "more" : mobileTab}
+              onNavigate={(id) => { if (id === "more") setMobileMoreOpen(true); else goToTab(id); }}
+              onAdd={floatingAddAction || (() => {})}
+              hasTodayAlertByTab={hasTodayAlertByTab} />
+            {mobileMoreOpen && (
+              <MobileMoreSheet role={role} userEmail={session.user?.email}
+                onNavigate={(id) => { setTab(id); setMobileMoreOpen(false); }}
+                onClose={() => setMobileMoreOpen(false)}
+                onSignOut={() => supabase.auth.signOut()} />
+            )}
+          </>
+        )}
+
+        {modal && (
+          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases}
+            editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
+            taskCaseId={folderCaseId}
+            financeContext={financeContext}
+            onAddClient={(v) => { addRow("clients", v); setModal(null); }}
+            onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
+            onAddCase={(v) => { addRow("cases", v); setModal(null); }}
+            onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
+            onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
+            onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
+            onAddTaskRecurring={(v, every, unit, times) => { addTaskRecurring(v, every, unit, times); setModal(null); setFolderCaseId(null); }}
+            onAddAppt={(v) => { addApptAndSync(v); setModal(null); }}
+            onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
+            onEditFinance={(id, v) => { editFinanceRow(id, v); setModal(null); setEditingFinance(null); }}
+            onAddFinanceRecurring={(v, months) => { addFinanceRecurring(v, months); setModal(null); setFinanceContext(null); }}
+            onAddEvent={(v) => { addRow("events", v); setModal(null); setFolderCaseId(null); }}
+            onAddNote={(v) => { addRow("notes", v); setModal(null); setFolderCaseId(null); }}
+            onAddDoc={(v) => { addRow("documents", v); setModal(null); setFolderCaseId(null); }}
+            onAddPrecedent={(v) => { addRow("precedents", v); setModal(null); setFolderCaseId(null); }}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", minHeight: 560, background: CREAM, fontFamily: "Arial, sans-serif", borderRadius: 10, overflow: "hidden", border: "1px solid #EAE7DC" }}>
