@@ -136,7 +136,7 @@ const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email,
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
-const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group });
+const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group, settledAt: r.settled_at });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
 const toNote = (r) => ({ id: r.id, caseId: r.case_id, date: r.note_date, content: r.content });
 const toDoc = (r) => ({ id: r.id, caseId: r.case_id, name: r.name, driveLink: r.drive_link });
@@ -182,7 +182,7 @@ function toPayload(key, row) {
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
-  if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: row.paid !== undefined ? row.paid : true, recurrence_group: row.recurrenceGroup || null };
+  if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
   if (key === "notes") return { case_id: row.caseId, note_date: row.date || todayISO(), content: row.content };
   if (key === "precedents") return { judge_id: row.judgeId, description: row.description, drive_link: row.driveLink || null };
@@ -626,8 +626,10 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
     const [description, setDescription] = useState(editing?.description || ""); const [amount, setAmount] = useState(editing?.amount || "");
     const [type, setType] = useState(editing?.type || financeContext?.presetType || "Receita"); const [date, setDate] = useState(editing?.date || todayISO());
     const [clientId, setClientId] = useState(editing?.clientId || financeContext?.clientId || "");
+    const [caseId, setCaseId] = useState(editing?.caseId || financeContext?.caseId || "");
     const [bankAccount, setBankAccount] = useState(editing?.bankAccount || "");
-    const [paid, setPaid] = useState(editing ? editing.paid !== false : true);
+    const [settled, setSettled] = useState(editing ? !!editing.settledAt : false);
+    const [settledAt, setSettledAt] = useState(editing?.settledAt || todayISO());
     const [recurrent, setRecurrent] = useState(false);
     const [months, setMonths] = useState(2);
     return (
@@ -635,13 +637,17 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
         <Field label="Descrição"><input style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Honorário — caso X" /></Field>
         <Field label="Tipo"><select style={inputStyle} value={type} onChange={(e) => setType(e.target.value)}><option>Receita</option><option>Despesa</option></select></Field>
         <Field label="Valor (R$)"><input type="number" step="0.01" style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" /></Field>
-        <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="Conta bancária (opcional)"><input style={inputStyle} value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Ex: Banco do Brasil — CC 12345-6" /></Field>
+        <Field label="Vencimento"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Forma de pagamento (opcional)"><input style={inputStyle} value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Ex: PIX - BTG, Boleto Escritório" /></Field>
         <Field label="Cliente (opcional)"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">—</option>{sortByName(clients).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 13, color: INK }}>
-          <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD }} />
+        <Field label="Caso vinculado (opcional)"><select style={inputStyle} value={caseId} onChange={(e) => setCaseId(e.target.value)}><option value="">—</option>{cases.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select></Field>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: settled ? 10 : 14, fontSize: 13, color: INK }}>
+          <input type="checkbox" checked={settled} onChange={(e) => setSettled(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD }} />
           {type === "Despesa" ? "Já foi pago" : "Já foi recebido"}
         </label>
+        {settled && (
+          <Field label="Data da liquidação"><input type="date" style={inputStyle} value={settledAt} onChange={(e) => setSettledAt(e.target.value)} /></Field>
+        )}
         {!editing && (
           <>
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 13, color: INK }}>
@@ -658,7 +664,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!description.trim() || !amount) { setError("Informe descrição e valor."); return; }
-          const base = { description: description.trim(), amount: Number(amount), type, date, clientId, bankAccount, paid, caseId: financeContext?.caseId || (editing ? editing.caseId : null) };
+          const base = { description: description.trim(), amount: Number(amount), type, date, clientId, caseId: caseId || null, bankAccount, settledAt: settled ? settledAt : null };
           if (editing) { onEditFinance(editing.id, base); return; }
           if (recurrent && Number(months) > 1) onAddFinanceRecurring(base, Number(months));
           else onAddFinance(base);
@@ -1989,77 +1995,239 @@ function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onToke
     </>
   );
 }
-function MonthlyChart({ finance, monthlyGoal }) {
+function financeStatus(f) {
+  const overdue = !f.settledAt && f.date && f.date < todayISO();
+  if (overdue) return "overdue";
+  if (f.settledAt) return f.type === "Despesa" ? "paid" : "received";
+  return f.type === "Despesa" ? "topay" : "receivable";
+}
+
+const STATUS_CHIP = {
+  receivable: { label: "a receber", bg: "#f4ecd8", color: "#8a6d3b" },
+  received: { label: "recebido", bg: "#e4efe6", color: "#1f6b4a" },
+  topay: { label: "a pagar", bg: "#f1ede2", color: "#23201a" },
+  paid: { label: "pago", bg: "#f1ede2", color: "#23201a" },
+  overdue: { label: "atrasado", bg: "#fdf3f0", color: "#c04a40" },
+};
+
+function FinancePrevisaoChart({ finance, onPickMonth, activeMonth }) {
   const now = new Date();
   const months = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: d.toLocaleDateString("pt-BR", { month: "short" }) };
+    const d = new Date(now.getFullYear(), now.getMonth() + 1 + i, 1);
+    return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, d };
   });
   const byMonth = months.map((m) => {
-    const items = finance.filter((f) => f.date && f.date.startsWith(m.key));
-    const receita = items.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount || 0), 0);
-    const despesa = items.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount || 0), 0);
-    return { ...m, receita, despesa, saldo: receita - despesa };
+    const total = finance
+      .filter((f) => f.type === "Receita" && !f.settledAt && f.date && f.date.startsWith(m.key))
+      .reduce((s, f) => s + Number(f.amount || 0), 0);
+    return { ...m, total };
   });
-  const maxVal = Math.max(monthlyGoal, ...byMonth.map((m) => Math.max(m.saldo, 0)), 1);
+  const maxVal = Math.max(...byMonth.map((m) => m.total), 1);
+  let lastYear = now.getFullYear();
 
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 160, padding: "10px 6px 0" }}>
-      {byMonth.map((m) => {
-        const h = Math.max(4, Math.round((Math.max(m.saldo, 0) / maxVal) * 130));
-        const hitGoal = m.saldo >= monthlyGoal && monthlyGoal > 0;
-        return (
-          <div key={m.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <div style={{ fontSize: 10, color: MUTED, marginBottom: 4 }}>{fmtBRL(m.saldo)}</div>
-            <div style={{
-              width: "100%", maxWidth: 36, height: h, borderRadius: "4px 4px 0 0",
-              background: m.saldo < 0 ? "#C0997B" : hitGoal ? "#27500A" : GOLD,
-            }} />
-            <div style={{ fontSize: 10.5, color: MUTED, marginTop: 6, textTransform: "capitalize" }}>{m.label}</div>
-          </div>
-        );
-      })}
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
+        <div style={{ fontFamily: "Georgia, serif", fontSize: 20, fontWeight: 600, color: SIDEBAR_NAVY }}>Previsão dos próximos meses</div>
+        <div style={{ fontSize: 13, color: TEXT_META }}>barras claras são valores ainda não confirmados</div>
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 150, borderBottom: `1px solid ${CARD_BORDER}`, paddingBottom: 0 }}>
+        {byMonth.map((m) => {
+          const showYear = m.d.getFullYear() !== lastYear || m.d.getMonth() === 0;
+          const yearChanged = m.d.getFullYear() !== now.getFullYear();
+          lastYear = m.d.getFullYear();
+          const h = m.total > 0 ? Math.max(20, Math.round((m.total / maxVal) * 120)) : 0;
+          const active = activeMonth === m.key;
+          return (
+            <div key={m.key} onClick={() => m.total > 0 && onPickMonth(active ? null : m.key)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%", cursor: m.total > 0 ? "pointer" : "default" }}>
+              {m.total > 0 ? (
+                <>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#8a6d3b", marginBottom: 6 }}>{fmtBRL(m.total)}</div>
+                  <div style={{
+                    width: "100%", maxWidth: 60, height: h, borderRadius: "4px 4px 0 0",
+                    background: "repeating-linear-gradient(45deg, #f0e4c6, #f0e4c6 6px, #f7f0dd 6px, #f7f0dd 12px)",
+                    border: "1px solid #ddcda0", borderBottom: "none",
+                    outline: active ? `2px solid ${GOLD_ACCENT}` : "none",
+                  }} />
+                </>
+              ) : (
+                <div style={{ width: "100%", maxWidth: 60, height: 2, background: CARD_BORDER, marginBottom: 26 }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
+        {byMonth.map((m) => {
+          const label = m.d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+          const withYear = m.d.getMonth() === 0 || m.d.getFullYear() !== now.getFullYear();
+          return (
+            <div key={m.key} style={{ flex: 1, textAlign: "center", fontSize: 13, color: m.total > 0 ? "#23201a" : TEXT_META, textTransform: "capitalize" }}>
+              {label}.{withYear ? ` ${String(m.d.getFullYear()).slice(2)}` : ""}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function FinanceTab({
-  finance, clients, monthlyGoal, onSaveGoal, onAdd, onEdit, onDelete, clientName,
-}) {
-  const [goalInput, setGoalInput] = useState(monthlyGoal || "");
-  const receitas = finance.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount || 0), 0);
-  const despesas = finance.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount || 0), 0);
+function FinanceTab({ finance, clients, cases, onAdd, onEdit, onDelete, clientName, onOpenCase }) {
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [monthFilter, setMonthFilter] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const withStatus = finance.map((f) => ({ ...f, _status: financeStatus(f) }));
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const yearKey = String(now.getFullYear());
+
+  // Resumo
+  const settledThisMonth = withStatus.filter((f) => f.settledAt && f.settledAt.startsWith(monthKey));
+  const recebidoMes = settledThisMonth.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount), 0);
+  const pagoMes = settledThisMonth.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount), 0);
+  const emCaixa = recebidoMes - pagoMes;
+
+  const aReceberItems = withStatus.filter((f) => f.type === "Receita" && !f.settledAt);
+  const aReceberTotal = aReceberItems.reduce((s, f) => s + Number(f.amount), 0);
+  const proximoAReceber = aReceberItems.filter((f) => f.date).sort((a, b) => a.date.localeCompare(b.date))[0];
+
+  const settledThisYear = withStatus.filter((f) => f.settledAt && f.settledAt.startsWith(yearKey));
+  const receitasAno = settledThisYear.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount), 0);
+  const despesasAno = settledThisYear.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount), 0);
+  const acumuladoAno = receitasAno - despesasAno;
+
+  // Chips
+  const chipCounts = {
+    all: withStatus.length,
+    receivable: withStatus.filter((f) => f.type === "Receita" && !f.settledAt).length,
+    received: withStatus.filter((f) => f._status === "received").length,
+    expense: withStatus.filter((f) => f.type === "Despesa").length,
+  };
+
+  let visible = withStatus;
+  if (statusFilter === "receivable") visible = visible.filter((f) => f.type === "Receita" && !f.settledAt);
+  else if (statusFilter === "received") visible = visible.filter((f) => f._status === "received");
+  else if (statusFilter === "expense") visible = visible.filter((f) => f.type === "Despesa");
+  if (monthFilter) visible = visible.filter((f) => f.date && f.date.startsWith(monthFilter));
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    visible = visible.filter((f) => [f.description, f.bankAccount, clientName(f.clientId)].filter(Boolean).some((s) => s.toLowerCase().includes(q)));
+  }
+
+  visible = visible.slice().sort((a, b) => {
+    const rank = (f) => f._status === "overdue" ? 0 : !f.settledAt ? 1 : 2;
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra < 2) return (a.date || "").localeCompare(b.date || "");
+    return (b.settledAt || "").localeCompare(a.settledAt || "");
+  });
+
+  const exportCsv = () => {
+    const rows = [["Vencimento", "Descrição", "Caso", "Status", "Valor"]];
+    visible.forEach((f) => {
+      const c = cases.find((cs) => cs.id === f.caseId);
+      rows.push([fmtDate(f.date), f.description, c ? c.title : "", STATUS_CHIP[f._status].label, `${f.type === "Despesa" ? "-" : ""}${f.amount}`]);
+    });
+    const csv = rows.map((r) => r.map((v) => `"${String(v || "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "financeiro.csv"; a.click(); URL.revokeObjectURL(url);
+  };
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Financeiro</h1>
-          <p style={{ color: MUTED, fontSize: 13.5, margin: 0 }}>Honorários e despesas do escritório.</p>
+          <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 600, color: SIDEBAR_NAVY, fontSize: 34, margin: "0 0 4px" }}>Financeiro</h1>
+          <p style={{ color: TEXT_SECONDARY, fontSize: 14, margin: 0 }}>Honorários e despesas do escritório.</p>
         </div>
-        <AddButton onClick={onAdd} />
-      </div>
-      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-        <StatCard icon={Wallet} label="Receitas" value={fmtBRL(receitas)} />
-        <StatCard icon={Wallet} label="Despesas" value={fmtBRL(despesas)} />
-        <StatCard icon={Wallet} label="Saldo" value={fmtBRL(receitas - despesas)} />
+        <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar lançamento" style={{ border: `1px solid ${DIVIDER}`, background: "#fff", borderRadius: 6, padding: "10px 14px", fontSize: 14, width: 180 }} />
+          <button onClick={onAdd} style={{ background: SIDEBAR_NAVY, color: "#f5efe4", border: "none", fontSize: 14, fontWeight: 600, padding: "11px 18px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>+ Adicionar</button>
+        </div>
       </div>
 
-      <SectionCard title="Desempenho mensal">
-        <MonthlyChart finance={finance} monthlyGoal={Number(monthlyGoal) || 0} />
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, paddingTop: 14, borderTop: "1px solid #F1EFE8" }}>
-          <span style={{ fontSize: 12.5, color: MUTED }}>Meta mensal (saldo)</span>
-          <input type="number" step="100" style={{ ...inputStyle, maxWidth: 160 }} value={goalInput} onChange={(e) => setGoalInput(e.target.value)} placeholder="Ex: 50000" />
-          <button onClick={() => onSaveGoal(Number(goalInput) || 0)} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 12.5, cursor: "pointer" }}>Salvar meta</button>
-        </div>
-      </SectionCard>
+      {/* Faixa de resumo */}
+      <div style={{ background: SIDEBAR_NAVY, borderRadius: 10, padding: "24px 0", display: "flex", marginBottom: 20 }}>
+        {[
+          { label: `EM CAIXA · ${now.toLocaleDateString("pt-BR", { month: "long" }).toUpperCase()}`, value: fmtBRL(emCaixa), detail: `recebido ${fmtBRL(recebidoMes)} · pago ${fmtBRL(pagoMes)}`, color: "#f5efe4" },
+          { label: "A RECEBER", value: fmtBRL(aReceberTotal), detail: `${aReceberItems.length} lançamento(s)${proximoAReceber ? ` · próximo em ${fmtDate(proximoAReceber.date)}` : ""}`, color: GOLD_ACCENT },
+          { label: "ACUMULADO NO ANO", value: fmtBRL(acumuladoAno), detail: `receitas ${fmtBRL(receitasAno)} · despesas ${fmtBRL(despesasAno)}`, color: "#f5efe4" },
+        ].map((col, i) => (
+          <div key={i} style={{ flex: 1, padding: "0 28px", borderLeft: i > 0 ? "1px solid rgba(232,226,213,0.16)" : "none" }}>
+            <div style={{ fontSize: 12, letterSpacing: "0.12em", fontWeight: 600, color: "rgba(240,234,221,0.55)", marginBottom: 8 }}>{col.label}</div>
+            <div style={{ fontFamily: "Georgia, serif", fontSize: 36, lineHeight: 1, color: col.color, marginBottom: 8 }}>{col.value}</div>
+            <div style={{ fontSize: 13, color: "rgba(240,234,221,0.65)" }}>{col.detail}</div>
+          </div>
+        ))}
+      </div>
 
-      {finance.slice().reverse().map((f) => (
-        <RowCard key={f.id} onEdit={() => onEdit(f)} onDelete={() => onDelete(f.id)} title={f.description}
-          subtitle={`${fmtDate(f.date)}${f.clientId ? " · " + clientName(f.clientId) : ""}${f.bankAccount ? " · " + f.bankAccount : ""}${!f.paid ? (f.type === "Despesa" ? " · a pagar" : " · a receber") : ""}`}
-          right={<span style={{ color: f.type === "Receita" ? "#27500A" : "#993D1D", fontSize: 14, fontWeight: 500 }}>{f.type === "Receita" ? "+" : "-"}{fmtBRL(f.amount)}</span>} />
-      ))}
-      {finance.length === 0 && <Empty text="Nenhum lançamento cadastrado." />}
+      {/* Previsão */}
+      <div style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "22px 24px", marginBottom: 20 }}>
+        <FinancePrevisaoChart finance={finance} onPickMonth={setMonthFilter} activeMonth={monthFilter} />
+      </div>
+
+      {/* Chips */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+        {[
+          { id: "all", label: "Tudo" }, { id: "receivable", label: "A receber" },
+          { id: "received", label: "Recebido" }, { id: "expense", label: "Despesas" },
+        ].map((c) => {
+          const active = statusFilter === c.id;
+          return (
+            <div key={c.id} onClick={() => setStatusFilter(c.id)} style={{
+              padding: "8px 15px", borderRadius: 20, fontSize: 13, cursor: "pointer",
+              background: active ? "#e8e1d2" : "transparent", color: active ? SIDEBAR_NAVY : TEXT_SECONDARY, fontWeight: active ? 600 : 400,
+              border: active ? "none" : `1px solid ${DIVIDER}`,
+            }}>{c.label} · {chipCounts[c.id]}</div>
+          );
+        })}
+        <div onClick={exportCsv} style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, color: GOLD_DARK, cursor: "pointer" }}>Exportar CSV</div>
+      </div>
+
+      {/* Lista */}
+      {visible.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "30px 0" }}>
+          <p style={{ fontSize: 15, color: TEXT_META, margin: "0 0 12px" }}>Nenhum lançamento aqui.</p>
+          <button onClick={onAdd} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, color: SIDEBAR_NAVY, fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 6, cursor: "pointer" }}>Adicionar lançamento</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {visible.map((f) => {
+            const c = cases.find((cs) => cs.id === f.caseId);
+            const chip = STATUS_CHIP[f._status];
+            const valueColor = f.type === "Despesa" ? "#c04a40" : f._status === "received" ? "#23201a" : "#1f6b4a";
+            const subtitleParts = [clientName(f.clientId) !== "—" ? clientName(f.clientId) : null, f.bankAccount].filter(Boolean);
+            return (
+              <div key={f.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "15px 18px", display: "flex", alignItems: "center", gap: 16, opacity: f.settledAt ? 0.8 : 1 }}>
+                <div style={{ width: 84, flexShrink: 0, fontSize: 14, color: "#23201a" }}>{fmtDate(f.date)}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 16, color: "#23201a" }}>{f.description}</div>
+                  {subtitleParts.length > 0 && <div style={{ fontSize: 13, color: TEXT_META, marginTop: 2 }}>{subtitleParts.join(" · ")}</div>}
+                </div>
+                <div style={{ width: 150, flexShrink: 0 }}>
+                  {c ? (
+                    <span onClick={() => onOpenCase(c.id)} style={{ fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>{c.title} ›</span>
+                  ) : (
+                    <span onClick={() => onEdit(f)} style={{ fontSize: 13, color: TEXT_META, cursor: "pointer" }}>Vincular a um caso</span>
+                  )}
+                </div>
+                <div style={{ width: 110, flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: chip.bg, color: chip.color }}>{chip.label}</span>
+                </div>
+                <div style={{ width: 130, flexShrink: 0, textAlign: "right", fontFamily: "Georgia, serif", fontSize: 20, color: valueColor }}>
+                  {f.type === "Despesa" ? "−" : ""}{fmtBRL(f.amount)}
+                </div>
+                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  <button onClick={() => onEdit(f)} style={{ background: "none", border: "none", cursor: "pointer", color: ICON_INACTIVE, padding: 10 }}><Pencil size={15} /></button>
+                  <button onClick={() => onDelete(f.id)} style={{ background: "none", border: "none", cursor: "pointer", color: ICON_INACTIVE, padding: 10 }}><Trash2 size={15} /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }
@@ -2752,10 +2920,11 @@ export default function RSACApp() {
             )}
             {mobileTab === "finance" && (
               <div style={{ padding: "16px 18px 100px" }}>
-                <FinanceTab finance={finance} clients={clients} monthlyGoal={monthlyGoal} onSaveGoal={saveMonthlyGoal}
+                <FinanceTab finance={finance} clients={clients} cases={cases}
                   onAdd={() => { setEditingFinance(null); setFinanceContext(null); setModal("finance"); }}
                   onEdit={(f) => { setEditingFinance(f); setModal("finance"); }}
-                  onDelete={(id) => removeRow("finance", id)} clientName={clientName} />
+                  onDelete={(id) => removeRow("finance", id)} clientName={clientName}
+                  onOpenCase={(id) => { setActiveCaseId(id); }} />
               </div>
             )}
             {mobileTab === "clients" && (
@@ -3194,11 +3363,11 @@ export default function RSACApp() {
         )}
 
         {tab === "finance" && (
-          <FinanceTab finance={finance} clients={clients} monthlyGoal={monthlyGoal} onSaveGoal={saveMonthlyGoal}
+          <FinanceTab finance={finance} clients={clients} cases={cases}
             onAdd={() => { setEditingFinance(null); setFinanceContext(null); setModal("finance"); }}
             onEdit={(f) => { setEditingFinance(f); setModal("finance"); }}
             onDelete={(id) => removeRow("finance", id)}
-            clientName={clientName} />
+            clientName={clientName} onOpenCase={(id) => openCase(id)} />
         )}
 
         {tab === "intake" && (
