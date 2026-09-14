@@ -131,6 +131,17 @@ const STATUS_COLORS = {
   "Encerrado": { bg: "#F1EFE8", text: "#444441" },
 };
 
+// Paleta rotativa para tipos de consultoria criados pelo usuário — sempre dessaturada,
+// nunca compete visualmente com os sinais de prazo/status
+const CASE_TYPE_PALETTE = [
+  { bg: "#e4e9ef", border: "#c9d4e0" }, // Negociação
+  { bg: "#e9e5f0", border: "#d3ccde" }, // Contratos
+  { bg: "#e4efe6", border: "#c7ddcd" }, // Imobiliária
+  { bg: "#f4ecd8", border: "#e6d9b4" },
+  { bg: "#f0e6e4", border: "#ddc7c2" },
+  { bg: "#e6eef0", border: "#c7dae0" },
+];
+
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code, nacionalidade: r.nacionalidade, estadoCivil: r.estado_civil, profissao: r.profissao, orgaoExpedidorRg: r.orgao_expedidor_rg, representanteLegal: r.representante_legal });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
@@ -179,7 +190,7 @@ async function loadAll() {
 
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null, nacionalidade: row.nacionalidade || null, estado_civil: row.estadoCivil || null, profissao: row.profissao || null, orgao_expedidor_rg: row.orgaoExpedidorRg || null, representante_legal: row.representanteLegal || null };
-  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number || null, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
+  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
@@ -210,6 +221,42 @@ async function editRow(key, id, row) {
   const { data, error } = await supabase.from(TABLE_BY_KEY[key]).update(toPayload(key, row)).eq("id", id).select();
   if (error) { console.error(error); return null; }
   return MAPPER_BY_KEY[key](data[0]);
+}
+
+// --- Tipos de consultoria (catálogo + vínculo muitos-para-muitos) ---
+const toCaseType = (r) => ({ id: r.id, name: r.name, bg: r.bg_color, border: r.border_color });
+
+async function fetchCaseTypesData() {
+  const [catalogRes, linksRes] = await Promise.all([
+    supabase.from("case_types").select("*").order("created_at"),
+    supabase.from("case_case_types").select("case_id, case_types(id, name, bg_color, border_color)"),
+  ]);
+  const catalog = (catalogRes.data || []).map(toCaseType);
+  const byCaseId = {};
+  (linksRes.data || []).forEach((row) => {
+    if (!row.case_types) return;
+    const t = toCaseType(row.case_types);
+    if (!byCaseId[row.case_id]) byCaseId[row.case_id] = [];
+    byCaseId[row.case_id].push(t);
+  });
+  return { catalog, byCaseId };
+}
+
+async function createCaseType(name, existingCount) {
+  const palette = CASE_TYPE_PALETTE[existingCount % CASE_TYPE_PALETTE.length];
+  const { data, error } = await supabase.from("case_types").insert([{ name, bg_color: palette.bg, border_color: palette.border }]).select();
+  if (error) { console.error(error); return null; }
+  return toCaseType(data[0]);
+}
+
+async function linkCaseType(caseId, typeId) {
+  const { error } = await supabase.from("case_case_types").insert([{ case_id: caseId, case_type_id: typeId }]);
+  if (error) console.error(error);
+}
+
+async function unlinkCaseType(caseId, typeId) {
+  const { error } = await supabase.from("case_case_types").delete().eq("case_id", caseId).eq("case_type_id", typeId);
+  if (error) console.error(error);
 }
 
 function Logo({ dark = true, size = "normal" }) {
@@ -383,6 +430,77 @@ function SectionCard({ title, children }) {
     <div style={{ background: "#fff", border: "1px solid #EAE7DC", borderRadius: 10, padding: 18, marginBottom: 16 }}>
       <h3 style={{ fontFamily: "Georgia, serif", fontSize: 14.5, color: NAVY, margin: "0 0 12px" }}>{title}</h3>
       {children}
+    </div>
+  );
+}
+
+function CaseTypeTags({ types, catalog, onAdd, onRemove }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const typeIds = new Set((types || []).map((t) => t.id));
+  const suggestions = (catalog || []).filter((t) => !typeIds.has(t.id) && t.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const canCreate = query.trim() && !(catalog || []).some((t) => t.name.toLowerCase() === query.trim().toLowerCase());
+
+  const commitAdd = (name) => {
+    if (!name.trim()) return;
+    onAdd(name.trim());
+    setQuery("");
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      {(types || []).map((t) => (
+        <span key={t.id} onClick={(e) => e.stopPropagation()} style={{
+          position: "relative", display: "inline-flex", alignItems: "center", gap: 5,
+          fontSize: 12, fontWeight: 600, color: "#12283f", background: t.bg, border: `1px solid ${t.border}`,
+          borderRadius: 20, padding: "5px 11px",
+        }} className="case-type-pill">
+          {t.name}
+          <span onClick={() => onRemove(t.id)} style={{ cursor: "pointer", opacity: 0.55, fontSize: 12, lineHeight: 1 }} title="Remover tipo">×</span>
+        </span>
+      ))}
+      <span onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} style={{
+        fontSize: 12, color: "#8a6d3b", border: "1px dashed #d6cdb8", borderRadius: 20, padding: "5px 11px", cursor: "pointer",
+      }}>+ tipo</span>
+
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 59 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: "absolute", top: "100%", left: 0, marginTop: 6, zIndex: 60, minWidth: 220,
+            background: "#fff", border: "1px solid #ddd6c8", borderRadius: 8, padding: 10,
+            boxShadow: "0 8px 24px rgba(18,40,63,0.16)",
+          }} onClick={(e) => e.stopPropagation()}>
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commitAdd(query); }}
+              placeholder="Buscar ou criar tipo…"
+              style={{ width: "100%", border: "1px solid #ddd6c8", borderRadius: 6, padding: "7px 9px", fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+            />
+            <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+              {suggestions.map((t) => (
+                <div key={t.id} onClick={() => commitAdd(t.name)} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "6px 7px", borderRadius: 6, cursor: "pointer", fontSize: 13,
+                }}>
+                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: t.bg, border: `1px solid ${t.border}` }} />
+                  {t.name}
+                </div>
+              ))}
+              {canCreate && (
+                <div onClick={() => commitAdd(query)} style={{ padding: "6px 7px", borderRadius: 6, cursor: "pointer", fontSize: 13, color: "#8a6d3b" }}>
+                  + Criar "{query.trim()}"
+                </div>
+              )}
+              {!suggestions.length && !canCreate && (
+                <div style={{ padding: "6px 7px", fontSize: 12.5, color: MUTED }}>Nenhum tipo disponível.</div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1250,6 +1368,7 @@ function MobileCaseScreen({
   onBack, onEdit, onOpenClient, onOpenJudge,
   onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask, onEditTask,
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
+  caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
 }) {
   const [wsTab, setWsTab] = useState("tarefas");
   const judge = clients.find((c) => c.id === item.judgeId);
@@ -1291,6 +1410,11 @@ function MobileCaseScreen({
           CASO · {item.caseType === "Judicial" ? "PROCESSO JUDICIAL" : "CONSULTORIA"}
         </div>
         <div style={{ fontFamily: "Georgia, serif", fontSize: 26, lineHeight: 1.2, color: "#f5efe4", marginBottom: 12, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.title}</div>
+        {item.caseType === "Consultoria" && (
+          <div style={{ marginBottom: 12 }}>
+            <CaseTypeTags types={caseTypes} catalog={caseTypesCatalog} onAdd={onAddCaseType} onRemove={onRemoveCaseType} />
+          </div>
+        )}
         <div style={{ display: "flex", gap: 22, overflowX: "auto", paddingTop: 13, paddingBottom: 13, borderTop: "1px solid rgba(232,226,213,0.12)", whiteSpace: "nowrap" }}>
           {TABS.map((t) => {
             const active = wsTab === t.id;
@@ -1471,6 +1595,7 @@ function CaseWorkspace({
   onEdit, onDelete, onOpenClient, onOpenJudge,
   onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask, onEditTask,
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
+  caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
 }) {
   const [wsTab, setWsTab] = useState("tarefas");
   const judge = clients.find((c) => c.id === item.judgeId);
@@ -1510,6 +1635,11 @@ function CaseWorkspace({
           <div style={{ fontSize: 13, color: MUTED, marginTop: 8 }}>
             {[item.number, item.vara].filter(Boolean).join(" · ") || "sem dados processuais"}
           </div>
+          {item.caseType === "Consultoria" && (
+            <div style={{ marginTop: 12 }}>
+              <CaseTypeTags types={caseTypes} catalog={caseTypesCatalog} onAdd={onAddCaseType} onRemove={onRemoveCaseType} />
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
           <button onClick={onEdit} style={{ background: "#fff", border: "1px solid #E3E0D6", color: SIDEBAR_NAVY, fontSize: 13, fontWeight: 600, padding: "10px 14px", borderRadius: 6, cursor: "pointer" }}>Editar</button>
@@ -2633,6 +2763,8 @@ export default function RSACApp() {
   const [role, setRole] = useState(null);
   const [newsletters, setNewsletters] = useState([]);
   const [portalData, setPortalData] = useState(null);
+  const [caseTypesCatalog, setCaseTypesCatalog] = useState([]);
+  const [caseTypesByCaseId, setCaseTypesByCaseId] = useState({});
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 900);
@@ -2653,6 +2785,8 @@ export default function RSACApp() {
       setClients(d.clients); setCases(d.cases); setTasks(d.tasks); setAppts(d.appts); setFinance(d.finance);
       setEvents(d.events); setNotes(d.notes); setDocuments(d.documents); setPrecedents(d.precedents);
       setMonthlyGoal(d.monthlyGoal || 0);
+      const { catalog, byCaseId } = await fetchCaseTypesData();
+      setCaseTypesCatalog(catalog); setCaseTypesByCaseId(byCaseId);
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
       const r = profile?.role || "staff";
       setRole(r);
@@ -2671,6 +2805,26 @@ export default function RSACApp() {
     const saved = await insertRow(key, row);
     if (saved) setters[key]((prev) => [...prev, saved]);
   }, [clients, cases, tasks, appts, finance]);
+
+  const handleAddCaseType = useCallback(async (caseId, name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    let type = caseTypesCatalog.find((t) => t.name.toLowerCase() === trimmed.toLowerCase());
+    if (!type) {
+      type = await createCaseType(trimmed, caseTypesCatalog.length);
+      if (!type) return;
+      setCaseTypesCatalog((prev) => [...prev, type]);
+    }
+    const already = (caseTypesByCaseId[caseId] || []).some((t) => t.id === type.id);
+    if (already) return;
+    await linkCaseType(caseId, type.id);
+    setCaseTypesByCaseId((prev) => ({ ...prev, [caseId]: [...(prev[caseId] || []), type] }));
+  }, [caseTypesCatalog, caseTypesByCaseId]);
+
+  const handleRemoveCaseType = useCallback(async (caseId, typeId) => {
+    await unlinkCaseType(caseId, typeId);
+    setCaseTypesByCaseId((prev) => ({ ...prev, [caseId]: (prev[caseId] || []).filter((t) => t.id !== typeId) }));
+  }, []);
 
   const addApptAndSync = useCallback(async (values) => {
     const saved = await insertRow("appts", values);
@@ -2898,7 +3052,10 @@ export default function RSACApp() {
             onDeleteDoc={(id) => removeRow("documents", id)}
             onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
             onAddPayment={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Receita" }); setModal("finance"); }}
-            onDeleteFinance={(id) => removeRow("finance", id)} />
+            onDeleteFinance={(id) => removeRow("finance", id)}
+            caseTypes={caseTypesByCaseId[wsCase.id] || []} caseTypesCatalog={caseTypesCatalog}
+            onAddCaseType={(name) => handleAddCaseType(wsCase.id, name)}
+            onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)} />
         ) : (
           <>
             {mobileTab === "cases" && (
@@ -3105,7 +3262,10 @@ export default function RSACApp() {
                 onDeleteDoc={(id) => removeRow("documents", id)}
                 onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
                 onAddPayment={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Receita" }); setModal("finance"); }}
-                onDeleteFinance={(id) => removeRow("finance", id)} />
+                onDeleteFinance={(id) => removeRow("finance", id)}
+                caseTypes={caseTypesByCaseId[wsCase.id] || []} caseTypesCatalog={caseTypesCatalog}
+                onAddCaseType={(name) => handleAddCaseType(wsCase.id, name)}
+                onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)} />
             );
           })()
         ) : (
