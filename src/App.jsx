@@ -124,6 +124,14 @@ const fmtDate = (iso) => {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
 };
 const fmtBRL = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtDateTime = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return fmtDate(iso);
+  const datePart = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
+  const timePart = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${datePart}, ${timePart}`;
+};
 
 const STATUS_COLORS = {
   "Ativo": { bg: "#EAF3DE", text: "#27500A" },
@@ -145,11 +153,16 @@ const CASE_TYPE_PALETTE = [
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code, nacionalidade: r.nacionalidade, estadoCivil: r.estado_civil, profissao: r.profissao, orgaoExpedidorRg: r.orgao_expedidor_rg, representanteLegal: r.representante_legal });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
-const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group });
+const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group, settledAt: r.settled_at });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
-const toNote = (r) => ({ id: r.id, caseId: r.case_id, date: r.note_date, content: r.content });
+const toNote = (r) => ({
+  id: r.id, caseId: r.case_id, date: r.note_date, content: r.content,
+  type: r.type || "reuniao", authorId: r.author_id, authorName: r.author_name,
+  occurredAt: r.occurred_at, createdAt: r.created_at, updatedAt: r.updated_at,
+  pinned: r.pinned || false, participantIds: r.participant_ids || [],
+});
 const toDoc = (r) => ({ id: r.id, caseId: r.case_id, name: r.name, driveLink: r.drive_link });
 const toPrecedent = (r) => ({ id: r.id, judgeId: r.judge_id, description: r.description, driveLink: r.drive_link });
 
@@ -191,11 +204,16 @@ async function loadAll() {
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null, nacionalidade: row.nacionalidade || null, estado_civil: row.estadoCivil || null, profissao: row.profissao || null, orgao_expedidor_rg: row.orgaoExpedidorRg || null, representante_legal: row.representanteLegal || null };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
-  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null };
+  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
-  if (key === "notes") return { case_id: row.caseId, note_date: row.date || todayISO(), content: row.content };
+  if (key === "notes") return {
+    case_id: row.caseId, note_date: row.date || todayISO(), content: row.content,
+    type: row.type || "reuniao", author_id: row.authorId || null, author_name: row.authorName || null,
+    occurred_at: row.occurredAt || row.date || todayISO(), pinned: row.pinned || false,
+    participant_ids: row.participantIds || [], updated_at: row.updatedAt || null,
+  };
   if (key === "precedents") return { judge_id: row.judgeId, description: row.description, drive_link: row.driveLink || null };
   if (key === "documents") return { case_id: row.caseId, name: row.name, drive_link: row.driveLink || null };
   return row;
@@ -509,6 +527,194 @@ function Empty({ text }) {
   return <p style={{ fontSize: 13.5, color: MUTED, background: "#fff", border: "1px dashed #DDD8C9", borderRadius: 8, padding: 20, textAlign: "center" }}>{text}</p>;
 }
 
+// --- Anotações do caso (composer, tipos, nota fixada, seleção de trecho -> tarefa) ---
+const NOTE_TYPES = [
+  { id: "reuniao", label: "Reunião", bg: "#e4e9ef" },
+  { id: "ligacao", label: "Ligação", bg: "#e4efe6" },
+  { id: "decisao", label: "Decisão", bg: "#f0e6ef" },
+  { id: "diligencia", label: "Diligência", bg: "#f4ecd8" },
+];
+const noteTypeMeta = (id) => NOTE_TYPES.find((t) => t.id === id) || NOTE_TYPES[0];
+
+function ParticipantPicker({ selectedIds, pool, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const selected = pool.filter((p) => (selectedIds || []).includes(p.id));
+  return (
+    <div style={{ position: "relative", alignSelf: "flex-start" }}>
+      <div onClick={() => setOpen((v) => !v)} style={{ fontSize: 12.5, color: NAVY, cursor: "pointer", border: "1px solid #E3E0D6", borderRadius: 6, padding: "6px 10px", display: "inline-block" }}>
+        {selected.length ? `Participantes: ${selected.map((p) => p.name).join(", ")}` : "+ Participantes"}
+      </div>
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 59 }} onClick={() => setOpen(false)} />
+          <div style={{
+            position: "absolute", top: "100%", left: 0, marginTop: 6, zIndex: 60, minWidth: 220, maxHeight: 220, overflowY: "auto",
+            background: "#fff", border: "1px solid #ddd6c8", borderRadius: 8, padding: 8, boxShadow: "0 8px 24px rgba(18,40,63,0.16)",
+          }} onClick={(e) => e.stopPropagation()}>
+            {pool.length === 0 && <div style={{ fontSize: 12.5, color: MUTED, padding: 6 }}>Nenhum contato cadastrado.</div>}
+            {pool.map((p) => (
+              <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={(selectedIds || []).includes(p.id)} onChange={() => onToggle(p.id)} style={{ accentColor: GOLD }} />
+                {p.name}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function NoteComposer({ onAdd, participantsPool }) {
+  const [content, setContent] = useState("");
+  const [type, setType] = useState("reuniao");
+  const [participantIds, setParticipantIds] = useState([]);
+  const [expanded, setExpanded] = useState(false);
+
+  const submit = () => {
+    if (!content.trim()) return;
+    onAdd({ content: content.trim(), type, participantIds, date: todayISO() });
+    setContent(""); setParticipantIds([]); setExpanded(false);
+  };
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <textarea
+        value={content} onChange={(e) => setContent(e.target.value)} onFocus={() => setExpanded(true)}
+        placeholder="Escrever uma anotação…"
+        style={{ border: "none", outline: "none", resize: "none", fontSize: 15, fontFamily: "inherit", minHeight: expanded ? 70 : 24, color: "#23201a" }}
+      />
+      {expanded && (
+        <ParticipantPicker selectedIds={participantIds} pool={participantsPool} onToggle={(id) => setParticipantIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])} />
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {NOTE_TYPES.map((t) => (
+            <span key={t.id} onClick={() => setType(t.id)} style={{
+              fontSize: 12.5, padding: "6px 12px", borderRadius: 20, cursor: "pointer",
+              background: type === t.id ? t.bg : "#fff", color: type === t.id ? "#12283f" : "#6b6455",
+              fontWeight: type === t.id ? 600 : 400, border: type === t.id ? "none" : "1px solid #ddd6c8",
+            }}>{t.label}</span>
+          ))}
+        </div>
+        <button onClick={submit} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>Salvar</button>
+      </div>
+    </div>
+  );
+}
+
+function PinnedNoteCard({ note, onUnpin }) {
+  return (
+    <div style={{ background: "#fdf9ec", border: "1px solid #e6d9b4", borderRadius: 8, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#8a6d3b" }}>📌 FIXADA</span>
+        <span onClick={onUnpin} style={{ fontSize: 12, color: "#8a6d3b", cursor: "pointer" }}>Desfixar</span>
+      </div>
+      <div style={{ fontSize: 12, color: "#857d6c" }}>atualizada em {fmtDateTime(note.updatedAt || note.occurredAt || note.date)} · {note.authorName || "—"}</div>
+      <div style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a", whiteSpace: "pre-wrap" }}>{note.content}</div>
+    </div>
+  );
+}
+
+function NoteCard({ note, participantsPool, onEdit, onDelete, onTogglePin, onCreateTask, derivedTaskCount }) {
+  const [editing, setEditing] = useState(false);
+  const [content, setContent] = useState(note.content);
+  const [selMenu, setSelMenu] = useState(null);
+  const meta = noteTypeMeta(note.type);
+  const participants = participantsPool.filter((p) => (note.participantIds || []).includes(p.id));
+  const edited = note.updatedAt && note.createdAt && note.updatedAt > note.createdAt;
+
+  const handleMouseUp = (e) => {
+    if (editing) return;
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().trim() : "";
+    if (text.length > 0) setSelMenu({ text, x: e.clientX, y: e.clientY });
+  };
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 11, position: "relative" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: meta.bg, color: "#12283f" }}>{meta.label}</span>
+          <span style={{ fontSize: 13, color: "#857d6c" }}>
+            {fmtDateTime(note.occurredAt || note.date)} · {note.authorName || "—"}{edited ? " · editada" : ""}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 12, color: "#b8b0a0", flexShrink: 0 }}>
+          <span onClick={() => onTogglePin(note)} title={note.pinned ? "Desfixar" : "Fixar"} style={{ cursor: "pointer" }}>📌</span>
+          <span onClick={() => setEditing((v) => !v)} title="Editar" style={{ cursor: "pointer" }}>✎</span>
+          <span onClick={() => onDelete(note.id)} title="Excluir" style={{ cursor: "pointer" }}><Trash2 size={14} /></span>
+        </div>
+      </div>
+
+      {editing ? (
+        <>
+          <textarea value={content} onChange={(e) => setContent(e.target.value)} style={{ fontSize: 15, lineHeight: 1.6, border: "1px solid #ddd6c8", borderRadius: 6, padding: "8px 10px", minHeight: 80, fontFamily: "inherit", resize: "vertical" }} />
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => { setEditing(false); setContent(note.content); }} style={{ background: "none", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer", color: MUTED }}>Cancelar</button>
+            <button onClick={() => { onEdit(note.id, { content }); setEditing(false); }} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer" }}>Salvar</button>
+          </div>
+        </>
+      ) : (
+        <div onMouseUp={handleMouseUp} style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a", whiteSpace: "pre-wrap" }}>{note.content}</div>
+      )}
+
+      {(participants.length > 0 || derivedTaskCount > 0) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 12, color: "#857d6c" }}>
+          {participants.length > 0 && <span>Participantes: {participants.map((p) => p.name).join(", ")}</span>}
+          {derivedTaskCount > 0 && (
+            <span style={{ fontWeight: 600, color: "#12283f", background: "#f4ecd8", borderRadius: 20, padding: "3px 10px" }}>
+              {derivedTaskCount} tarefa{derivedTaskCount > 1 ? "s" : ""} criada{derivedTaskCount > 1 ? "s" : ""} daqui
+            </span>
+          )}
+        </div>
+      )}
+
+      {selMenu && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 69 }} onClick={() => setSelMenu(null)} />
+          <button onClick={() => { onCreateTask(note, selMenu.text); setSelMenu(null); window.getSelection()?.removeAllRanges(); }} style={{
+            position: "fixed", left: selMenu.x, top: selMenu.y - 38, zIndex: 70,
+            background: "#12283f", color: "#fff", border: "none", borderRadius: 6, padding: "7px 12px", fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
+          }}>+ Criar tarefa</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function NotesPanel({ notes, participantsPool, tasks, onAdd, onEdit, onDelete, onTogglePin, onCreateTaskFromNote }) {
+  const [typeFilter, setTypeFilter] = useState("todas");
+  const [search, setSearch] = useState("");
+
+  const pinned = notes.find((n) => n.pinned);
+  const rest = notes
+    .filter((n) => !n.pinned)
+    .filter((n) => typeFilter === "todas" || n.type === typeFilter)
+    .filter((n) => !search.trim() || n.content.toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((a, b) => (b.occurredAt || b.date || "").localeCompare(a.occurredAt || a.date || ""));
+
+  const derivedCount = (noteId) => (tasks || []).filter((t) => t.sourceNoteId === noteId).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <NoteComposer onAdd={onAdd} participantsPool={participantsPool} />
+      {pinned && <PinnedNoteCard note={pinned} onUnpin={() => onTogglePin(pinned)} />}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <span onClick={() => setTypeFilter("todas")} style={{ fontSize: 12.5, padding: "5px 11px", borderRadius: 20, cursor: "pointer", background: typeFilter === "todas" ? "#e8e1d2" : "#fff", border: "1px solid #ddd6c8", fontWeight: typeFilter === "todas" ? 600 : 400 }}>Todas</span>
+        {NOTE_TYPES.map((t) => (
+          <span key={t.id} onClick={() => setTypeFilter(t.id)} style={{ fontSize: 12.5, padding: "5px 11px", borderRadius: 20, cursor: "pointer", background: typeFilter === t.id ? "#e8e1d2" : "#fff", border: "1px solid #ddd6c8", fontWeight: typeFilter === t.id ? 600 : 400 }}>{t.label}</span>
+        ))}
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar nas anotações" style={{ marginLeft: "auto", fontSize: 12.5, border: "1px solid #ddd6c8", borderRadius: 6, padding: "6px 10px", minWidth: 160 }} />
+      </div>
+      {rest.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação encontrada.</p>}
+      {rest.map((n) => (
+        <NoteCard key={n.id} note={n} participantsPool={participantsPool} onEdit={onEdit} onDelete={onDelete} onTogglePin={onTogglePin} onCreateTask={onCreateTaskFromNote} derivedTaskCount={derivedCount(n.id)} />
+      ))}
+    </div>
+  );
+}
+
 function SubmitRow({ onClose, onSubmit, submitLabel }) {
   return (
     <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
@@ -518,7 +724,7 @@ function SubmitRow({ onClose, onSubmit, submitLabel }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -662,7 +868,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
   }
 
   if (modal === "task") {
-    const [title, setTitle] = useState(editing?.title || ""); const [dueDate, setDueDate] = useState(editing?.dueDate || "");
+    const [title, setTitle] = useState(editing?.title || taskPrefill?.title || ""); const [dueDate, setDueDate] = useState(editing?.dueDate || "");
     const [notes, setNotes] = useState(editing?.notes || "");
     const [caseId, setCaseId] = useState(editing?.caseId || taskCaseId || "");
     const [recurrent, setRecurrent] = useState(false);
@@ -716,7 +922,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Descreva a tarefa."); return; }
-          const base = { title: title.trim(), dueDate, notes, caseId: editing ? (caseId || null) : (taskCaseId || null) };
+          const base = { title: title.trim(), dueDate, notes, caseId: editing ? (caseId || null) : (taskCaseId || null), sourceNoteId: editing ? editing.sourceNoteId : (taskPrefill?.sourceNoteId || null) };
           if (editing) { onEditTask(editing.id, base); return; }
           if (recurrent && dueDate && Number(times) > 1) onAddTaskRecurring(base, Number(every), unit, Number(times));
           else onAddTask(base);
@@ -1369,6 +1575,7 @@ function MobileCaseScreen({
   onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask, onEditTask,
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
+  onEditNoteContent, onTogglePinNote, onCreateTaskFromNote, onAddNoteRich,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
   const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
@@ -1505,20 +1712,31 @@ function MobileCaseScreen({
                 </div>
               ))}
             </SectionCard>
+            {!isConsultoria && (
+              <SectionCard title="Anotações">
+                {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+                {caseNotes.map((n) => (
+                  <div key={n.id} style={{ padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                    <div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div>
+                    <div style={{ fontSize: 13, color: INK }}>{n.content}</div>
+                  </div>
+                ))}
+                <button onClick={onAddNote} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar anotação</button>
+              </SectionCard>
+            )}
           </>
         )}
-
         {wsTab === "anotacoes" && (
-          <SectionCard title="Anotações">
-            <p style={{ fontSize: 12, color: MUTED, margin: "0 0 10px" }}>Versão simples por enquanto — tipos, fixação e participantes chegam no item 3 do pacote.</p>
-            {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
-            {caseNotes.map((n) => (
-              <div key={n.id} style={{ padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
-                <div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div>
-                <div style={{ fontSize: 13, color: INK }}>{n.content}</div>
-              </div>
-            ))}
-          </SectionCard>
+          <NotesPanel
+            notes={caseNotes}
+            participantsPool={clients}
+            tasks={tasks}
+            onAdd={(values) => onAddNoteRich(values)}
+            onEdit={onEditNoteContent}
+            onDelete={onDeleteNote}
+            onTogglePin={onTogglePinNote}
+            onCreateTaskFromNote={onCreateTaskFromNote}
+          />
         )}
 
 
@@ -1624,6 +1842,7 @@ function CaseWorkspace({
   onAddEvent, onDeleteEvent, onToggleTask, onDeleteTask, onAddTask, onEditTask,
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
+  onEditNoteContent, onTogglePinNote, onCreateTaskFromNote, onAddNoteRich,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
   const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
@@ -1788,17 +2007,16 @@ function CaseWorkspace({
       )}
 
       {wsTab === "anotacoes" && (
-        <SectionCard title="Anotações">
-          <p style={{ fontSize: 12, color: MUTED, margin: "0 0 10px" }}>Versão simples por enquanto — tipos, fixação e participantes chegam no item 3 do pacote.</p>
-          {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
-          {caseNotes.map((n) => (
-            <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
-              <div><div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div><div style={{ fontSize: 13, color: INK }}>{n.content}</div></div>
-              <button onClick={() => onDeleteNote(n.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
-            </div>
-          ))}
-          <button onClick={onAddNote} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar anotação</button>
-        </SectionCard>
+        <NotesPanel
+          notes={caseNotes}
+          participantsPool={clients}
+          tasks={tasks}
+          onAdd={(values) => onAddNoteRich(values)}
+          onEdit={onEditNoteContent}
+          onDelete={onDeleteNote}
+          onTogglePin={onTogglePinNote}
+          onCreateTaskFromNote={onCreateTaskFromNote}
+        />
       )}
 
 
@@ -2821,6 +3039,8 @@ export default function RSACApp() {
   const [portalData, setPortalData] = useState(null);
   const [caseTypesCatalog, setCaseTypesCatalog] = useState([]);
   const [caseTypesByCaseId, setCaseTypesByCaseId] = useState({});
+  const [currentUserName, setCurrentUserName] = useState("Você");
+  const [taskPrefill, setTaskPrefill] = useState(null);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 900);
@@ -2843,9 +3063,10 @@ export default function RSACApp() {
       setMonthlyGoal(d.monthlyGoal || 0);
       const { catalog, byCaseId } = await fetchCaseTypesData();
       setCaseTypesCatalog(catalog); setCaseTypesByCaseId(byCaseId);
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", session.user.id).single();
+      const { data: profile } = await supabase.from("profiles").select("role, full_name").eq("id", session.user.id).single();
       const r = profile?.role || "staff";
       setRole(r);
+      setCurrentUserName(profile?.full_name || session.user.email || "Você");
       if (r === "admin") {
         const { data: nl } = await supabase.from("newsletters").select("*").order("scheduled_for", { ascending: false });
         setNewsletters(nl || []);
@@ -2880,6 +3101,37 @@ export default function RSACApp() {
   const handleRemoveCaseType = useCallback(async (caseId, typeId) => {
     await unlinkCaseType(caseId, typeId);
     setCaseTypesByCaseId((prev) => ({ ...prev, [caseId]: (prev[caseId] || []).filter((t) => t.id !== typeId) }));
+  }, []);
+
+  const handleAddNote = useCallback(async (caseId, values) => {
+    const saved = await insertRow("notes", { ...values, caseId, authorId: session?.user?.id || null, authorName: currentUserName });
+    if (saved) setNotes((prev) => [...prev, saved]);
+  }, [session, currentUserName]);
+
+  const handleEditNoteContent = useCallback(async (noteId, patch) => {
+    const current = notes.find((n) => n.id === noteId);
+    if (!current) return;
+    const merged = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    const saved = await editRow("notes", noteId, merged);
+    if (saved) setNotes((prev) => prev.map((n) => (n.id === noteId ? saved : n)));
+  }, [notes]);
+
+  const handleTogglePinNote = useCallback(async (note) => {
+    const otherPinned = notes.find((n) => n.caseId === note.caseId && n.pinned && n.id !== note.id);
+    const nextPinned = !note.pinned;
+    if (otherPinned) await updateRow("notes", otherPinned.id, { pinned: false });
+    await updateRow("notes", note.id, { pinned: nextPinned });
+    setNotes((prev) => prev.map((n) => {
+      if (n.id === note.id) return { ...n, pinned: nextPinned };
+      if (otherPinned && n.id === otherPinned.id) return { ...n, pinned: false };
+      return n;
+    }));
+  }, [notes]);
+
+  const handleCreateTaskFromNote = useCallback((note, selectedText) => {
+    setFolderCaseId(note.caseId);
+    setTaskPrefill({ title: selectedText, sourceNoteId: note.id });
+    setModal("task");
   }, []);
 
   const addApptAndSync = useCallback(async (values) => {
@@ -3111,7 +3363,10 @@ export default function RSACApp() {
             onDeleteFinance={(id) => removeRow("finance", id)}
             caseTypes={caseTypesByCaseId[wsCase.id] || []} caseTypesCatalog={caseTypesCatalog}
             onAddCaseType={(name) => handleAddCaseType(wsCase.id, name)}
-            onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)} />
+            onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)}
+            onEditNoteContent={handleEditNoteContent} onTogglePinNote={handleTogglePinNote}
+            onCreateTaskFromNote={handleCreateTaskFromNote}
+            onAddNoteRich={(values) => handleAddNote(wsCase.id, values)} />
         ) : (
           <>
             {mobileTab === "cases" && (
@@ -3321,7 +3576,10 @@ export default function RSACApp() {
                 onDeleteFinance={(id) => removeRow("finance", id)}
                 caseTypes={caseTypesByCaseId[wsCase.id] || []} caseTypesCatalog={caseTypesCatalog}
                 onAddCaseType={(name) => handleAddCaseType(wsCase.id, name)}
-                onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)} />
+                onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)}
+                onEditNoteContent={handleEditNoteContent} onTogglePinNote={handleTogglePinNote}
+                onCreateTaskFromNote={handleCreateTaskFromNote}
+                onAddNoteRich={(values) => handleAddNote(wsCase.id, values)} />
             );
           })()
         ) : (
@@ -3598,15 +3856,16 @@ export default function RSACApp() {
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases} prefill={prefillClient}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); }} clients={clients} cases={cases} prefill={prefillClient}
           editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
           taskCaseId={folderCaseId}
+          taskPrefill={taskPrefill}
           financeContext={financeContext}
           onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
           onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
           onAddCase={(v) => { addRow("cases", v); setModal(null); }}
           onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
-          onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
+          onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); setTaskPrefill(null); }}
           onAddTaskRecurring={(v, every, unit, times) => { addTaskRecurring(v, every, unit, times); setModal(null); setFolderCaseId(null); }}
           onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
           onAddAppt={(v) => { addApptAndSync(v); setModal(null); }}
