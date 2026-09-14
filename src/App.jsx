@@ -724,6 +724,71 @@ function SubmitRow({ onClose, onSubmit, submitLabel }) {
   );
 }
 
+// --- Semana de tarefas do caso (tela 4D): mesmo cadastro, hora decide se cai na Agenda ---
+function CaseTasksWeekView({ tasks, onEditTask }) {
+  const [weekAnchor, setWeekAnchor] = useState(todayISO());
+  const anchor = new Date(weekAnchor + "T00:00:00");
+  const dow = (anchor.getDay() + 6) % 7; // 0 = segunda
+  const weekStart = new Date(anchor);
+  weekStart.setDate(anchor.getDate() - dow);
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d; });
+  const dayLabels = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const today = todayISO();
+
+  const byDay = {};
+  tasks.filter((t) => t.dueDate).forEach((t) => { (byDay[t.dueDate] = byDay[t.dueDate] || []).push(t); });
+  Object.values(byDay).forEach((list) => list.sort((a, b) => (a.time || "").localeCompare(b.time || "")));
+  const noDate = tasks.filter((t) => !t.dueDate);
+
+  const rangeLabel = `Semana de ${days[0].getDate()} a ${days[6].getDate()} de ${days[6].toLocaleDateString("pt-BR", { month: "long" })}`;
+  const navBtn = { background: "none", border: "1px solid #E3E0D6", borderRadius: 6, width: 28, height: 28, cursor: "pointer", color: NAVY, fontSize: 13 };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekAnchor(iso(d)); }} style={navBtn}>←</button>
+        <div style={{ fontSize: 12.5, color: MUTED, textTransform: "capitalize" }}>{rangeLabel}</div>
+        <button onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekAnchor(iso(d)); }} style={navBtn}>→</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 18 }}>
+        {days.map((d, i) => {
+          const dISO = iso(d);
+          const isToday = dISO === today;
+          const items = byDay[dISO] || [];
+          return (
+            <div key={dISO} style={{ border: isToday ? `1px solid ${GOLD}` : "1px solid #E3E0D6", borderRadius: 8, padding: 7, minHeight: 108, background: "#fff" }}>
+              <div style={{ fontSize: 10, color: isToday ? "#8a6d3b" : "#9A917E", fontWeight: isToday ? 700 : 400, textTransform: "uppercase" }}>{dayLabels[i]} {d.getDate()}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 6 }}>
+                {items.map((t) => (
+                  <div key={t.id} onClick={() => onEditTask(t)} style={{
+                    background: t.time ? NAVY : "#F1EFE8", color: t.time ? "#EDE6D8" : INK,
+                    borderRadius: 6, padding: "5px 7px", fontSize: 11, cursor: "pointer", opacity: t.done ? 0.6 : 1, lineHeight: 1.3,
+                  }}>
+                    {t.time && <div style={{ fontWeight: 700, color: GOLD, fontSize: 10.5 }}>{t.time}</div>}
+                    <div>{t.title}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {noDate.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10.5, letterSpacing: 1, color: "#9A917E", textTransform: "uppercase", marginBottom: 8 }}>Sem data definida · não aparece na agenda</div>
+          {noDate.map((t) => (
+            <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+              <span style={{ fontSize: 13, color: INK, opacity: t.done ? 0.6 : 1 }}>{t.title}</span>
+              <span onClick={() => onEditTask(t)} style={{ fontSize: 12, color: NAVY, cursor: "pointer" }}>Definir data</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
@@ -1579,6 +1644,7 @@ function MobileCaseScreen({
 }) {
   const isConsultoria = item.caseType === "Consultoria";
   const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
+  const [taskView, setTaskView] = useState("lista");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
   const caseTasks = tasks.filter((t) => t.caseId === item.id);
@@ -1663,22 +1729,37 @@ function MobileCaseScreen({
         )}
 
         {wsTab === "tarefas" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {caseTasks.length === 0 && <p style={{ fontSize: 15, color: TEXT_META, textAlign: "center", padding: "30px 0" }}>Nenhuma tarefa neste caso.</p>}
-            {openTasks.map((t) => (
-              <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px" }}>
-                <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" checkboxSize={22} />
-              </div>
-            ))}
-            {doneTasks.length > 0 && (
-              <>
-                <div style={{ fontSize: 11, letterSpacing: 1, color: TEXT_META, textTransform: "uppercase", margin: "10px 0 0" }}>Concluídas</div>
-                {doneTasks.map((t) => (
-                  <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px", opacity: 0.72 }}>
+          <div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 12 }}>
+              {["semana", "lista"].map((v) => (
+                <span key={v} onClick={() => setTaskView(v)} style={{
+                  fontSize: 12, padding: "5px 12px", borderRadius: 20, cursor: "pointer", textTransform: "capitalize",
+                  background: taskView === v ? SIDEBAR_NAVY : "#fff", color: taskView === v ? "#EDE6D8" : NAVY,
+                  border: taskView === v ? "none" : "1px solid #E3E0D6", fontWeight: taskView === v ? 600 : 400,
+                }}>{v}</span>
+              ))}
+            </div>
+            {taskView === "semana" ? (
+              <CaseTasksWeekView tasks={caseTasks} onEditTask={onEditTask} />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {caseTasks.length === 0 && <p style={{ fontSize: 15, color: TEXT_META, textAlign: "center", padding: "30px 0" }}>Nenhuma tarefa neste caso.</p>}
+                {openTasks.map((t) => (
+                  <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px" }}>
                     <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" checkboxSize={22} />
                   </div>
                 ))}
-              </>
+                {doneTasks.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 11, letterSpacing: 1, color: TEXT_META, textTransform: "uppercase", margin: "10px 0 0" }}>Concluídas</div>
+                    {doneTasks.map((t) => (
+                      <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px", opacity: 0.72 }}>
+                        <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" checkboxSize={22} />
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -1846,6 +1927,7 @@ function CaseWorkspace({
 }) {
   const isConsultoria = item.caseType === "Consultoria";
   const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
+  const [taskView, setTaskView] = useState("lista");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
   const caseTasks = tasks.filter((t) => t.caseId === item.id);
@@ -1937,24 +2019,39 @@ function CaseWorkspace({
       )}
 
       {wsTab === "tarefas" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {caseTasks.length === 0 && (
-            <div style={{ textAlign: "center", padding: "30px 0" }}>
-              <p style={{ fontSize: 15, color: TEXT_META, margin: "0 0 12px" }}>Nenhuma tarefa neste caso.</p>
-              <button onClick={onAddTask} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, color: SIDEBAR_NAVY, fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 6, cursor: "pointer" }}>Adicionar tarefa</button>
+        <div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 12 }}>
+            {["semana", "lista"].map((v) => (
+              <span key={v} onClick={() => setTaskView(v)} style={{
+                fontSize: 12, padding: "5px 12px", borderRadius: 20, cursor: "pointer", textTransform: "capitalize",
+                background: taskView === v ? SIDEBAR_NAVY : "#fff", color: taskView === v ? "#EDE6D8" : NAVY,
+                border: taskView === v ? "none" : "1px solid #E3E0D6", fontWeight: taskView === v ? 600 : 400,
+              }}>{v}</span>
+            ))}
+          </div>
+          {taskView === "semana" ? (
+            <CaseTasksWeekView tasks={caseTasks} onEditTask={onEditTask} />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {caseTasks.length === 0 && (
+                <div style={{ textAlign: "center", padding: "30px 0" }}>
+                  <p style={{ fontSize: 15, color: TEXT_META, margin: "0 0 12px" }}>Nenhuma tarefa neste caso.</p>
+                  <button onClick={onAddTask} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, color: SIDEBAR_NAVY, fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 6, cursor: "pointer" }}>Adicionar tarefa</button>
+                </div>
+              )}
+              {caseTasks.slice().sort((a, b) => {
+                if (a.done !== b.done) return a.done ? 1 : -1;
+                if (!a.dueDate && !b.dueDate) return 0;
+                if (!a.dueDate) return 1;
+                if (!b.dueDate) return -1;
+                return a.dueDate.localeCompare(b.dueDate);
+              }).map((t) => (
+                <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px", opacity: t.done ? 0.72 : 1 }}>
+                  <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" />
+                </div>
+              ))}
             </div>
           )}
-          {caseTasks.slice().sort((a, b) => {
-            if (a.done !== b.done) return a.done ? 1 : -1;
-            if (!a.dueDate && !b.dueDate) return 0;
-            if (!a.dueDate) return 1;
-            if (!b.dueDate) return -1;
-            return a.dueDate.localeCompare(b.dueDate);
-          }).map((t) => (
-            <div key={t.id} style={{ background: "#fff", border: `1px solid ${CARD_BORDER}`, borderRadius: 8, padding: "16px 18px", opacity: t.done ? 0.72 : 1 }}>
-              <TaskRow t={t} onToggle={onToggleTask} onDelete={onDeleteTask} onEdit={onEditTask} showDueInfo variant="card" />
-            </div>
-          ))}
         </div>
       )}
 
