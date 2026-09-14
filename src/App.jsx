@@ -1370,7 +1370,8 @@ function MobileCaseScreen({
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
 }) {
-  const [wsTab, setWsTab] = useState("tarefas");
+  const isConsultoria = item.caseType === "Consultoria";
+  const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
   const caseTasks = tasks.filter((t) => t.caseId === item.id);
@@ -1381,19 +1382,29 @@ function MobileCaseScreen({
   const caseExpenses = caseFinance.filter((f) => f.type === "Despesa");
   const casePayments = caseFinance.filter((f) => f.type === "Receita");
 
-  const TABS = [
+  const TABS = isConsultoria ? [
+    { id: "visao-geral", label: "Visão geral", count: 0 },
+    { id: "contrato", label: "Contrato", count: 0 },
+    { id: "tarefas", label: "Tarefas", count: openTaskCount },
+    { id: "anotacoes", label: "Anotações", count: caseNotes.length },
+    { id: "documentos", label: "Documentos", count: caseDocs.length },
+    { id: "financeiro", label: "Financeiro", count: caseFinance.length },
+    { id: "contatos", label: "Contatos", count: 0 },
+  ] : [
     { id: "tarefas", label: "Tarefas", count: openTaskCount },
     { id: "prazos", label: "Prazos", count: caseEvents.length },
-    { id: "documentos", label: "Documentos", count: caseDocs.length + caseNotes.length },
+    { id: "documentos", label: "Documentos", count: caseDocs.length },
     { id: "financeiro", label: "Financeiro", count: caseFinance.length },
     { id: "contatos", label: "Contatos", count: 0 },
   ];
   const footerLabel = {
-    tarefas: "+ Nova tarefa neste caso", prazos: "+ Adicionar evento", documentos: "+ Adicionar documento",
+    "visao-geral": null, contrato: null,
+    tarefas: "+ Nova tarefa neste caso", prazos: "+ Adicionar evento", anotacoes: "+ Adicionar anotação", documentos: "+ Adicionar documento",
     financeiro: "+ Adicionar lançamento", contatos: null,
   }[wsTab];
   const footerAction = {
-    tarefas: onAddTask, prazos: onAddEvent, documentos: onAddDoc, financeiro: onAddExpense, contatos: null,
+    "visao-geral": null, contrato: null,
+    tarefas: onAddTask, prazos: onAddEvent, anotacoes: onAddNote, documentos: onAddDoc, financeiro: onAddExpense, contatos: null,
   }[wsTab];
 
   const openTasks = caseTasks.filter((t) => !t.done).sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999"));
@@ -1432,6 +1443,18 @@ function MobileCaseScreen({
       </div>
 
       <div style={{ padding: "18px 18px 0" }}>
+        {wsTab === "visao-geral" && (
+          <SectionCard title="Visão geral">
+            <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a faixa de contrato ativo, tarefas recentes e última anotação chegam junto com os itens 3 (Anotações) e 5 (Contratos) do pacote.</p>
+          </SectionCard>
+        )}
+
+        {wsTab === "contrato" && (
+          <SectionCard title="Contrato">
+            <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a gestão de contratos (vigência, honorários, renovação) chega no item 5 do pacote.</p>
+          </SectionCard>
+        )}
+
         {wsTab === "tarefas" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {caseTasks.length === 0 && <p style={{ fontSize: 15, color: TEXT_META, textAlign: "center", padding: "30px 0" }}>Nenhuma tarefa neste caso.</p>}
@@ -1482,17 +1505,22 @@ function MobileCaseScreen({
                 </div>
               ))}
             </SectionCard>
-            <SectionCard title="Anotações">
-              {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
-              {caseNotes.map((n) => (
-                <div key={n.id} style={{ padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
-                  <div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div>
-                  <div style={{ fontSize: 13, color: INK }}>{n.content}</div>
-                </div>
-              ))}
-            </SectionCard>
           </>
         )}
+
+        {wsTab === "anotacoes" && (
+          <SectionCard title="Anotações">
+            <p style={{ fontSize: 12, color: MUTED, margin: "0 0 10px" }}>Versão simples por enquanto — tipos, fixação e participantes chegam no item 3 do pacote.</p>
+            {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+            {caseNotes.map((n) => (
+              <div key={n.id} style={{ padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+                <div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div>
+                <div style={{ fontSize: 13, color: INK }}>{n.content}</div>
+              </div>
+            ))}
+          </SectionCard>
+        )}
+
 
         {wsTab === "financeiro" && (
           <>
@@ -1597,7 +1625,8 @@ function CaseWorkspace({
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
 }) {
-  const [wsTab, setWsTab] = useState("tarefas");
+  const isConsultoria = item.caseType === "Consultoria";
+  const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
   const caseTasks = tasks.filter((t) => t.caseId === item.id);
@@ -1608,20 +1637,30 @@ function CaseWorkspace({
   const caseExpenses = caseFinance.filter((f) => f.type === "Despesa");
   const casePayments = caseFinance.filter((f) => f.type === "Receita");
 
-  const TABS = [
+  const TABS = isConsultoria ? [
+    { id: "visao-geral", label: "Visão geral", count: 0 },
+    { id: "contrato", label: "Contrato", count: 0 },
+    { id: "tarefas", label: "Tarefas", count: openTaskCount },
+    { id: "anotacoes", label: "Anotações", count: caseNotes.length },
+    { id: "documentos", label: "Documentos", count: caseDocs.length },
+    { id: "financeiro", label: "Financeiro", count: caseFinance.length },
+    { id: "contatos", label: "Contatos", count: 0 },
+  ] : [
     { id: "tarefas", label: "Tarefas", count: openTaskCount },
     { id: "prazos", label: "Prazos", count: caseEvents.length },
-    { id: "documentos", label: "Documentos", count: caseDocs.length + caseNotes.length },
+    { id: "documentos", label: "Documentos", count: caseDocs.length },
     { id: "financeiro", label: "Financeiro", count: caseFinance.length },
     { id: "contatos", label: "Contatos", count: 0 },
   ];
 
   const addLabel = {
-    tarefas: "+ Nova tarefa", prazos: "+ Adicionar evento", documentos: "+ Adicionar documento",
+    "visao-geral": null, contrato: null,
+    tarefas: "+ Nova tarefa", prazos: "+ Adicionar evento", anotacoes: "+ Adicionar anotação", documentos: "+ Adicionar documento",
     financeiro: "+ Adicionar lançamento", contatos: null,
   }[wsTab];
   const addAction = {
-    tarefas: onAddTask, prazos: onAddEvent, documentos: onAddDoc, financeiro: onAddExpense, contatos: null,
+    "visao-geral": null, contrato: null,
+    tarefas: onAddTask, prazos: onAddEvent, anotacoes: onAddNote, documentos: onAddDoc, financeiro: onAddExpense, contatos: null,
   }[wsTab];
 
   return (
@@ -1665,6 +1704,18 @@ function CaseWorkspace({
           );
         })}
       </div>
+
+      {wsTab === "visao-geral" && (
+        <SectionCard title="Visão geral">
+          <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a faixa de contrato ativo, tarefas recentes e última anotação chegam junto com os itens 3 (Anotações) e 5 (Contratos) do pacote.</p>
+        </SectionCard>
+      )}
+
+      {wsTab === "contrato" && (
+        <SectionCard title="Contrato">
+          <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a gestão de contratos (vigência, honorários, renovação) chega no item 5 do pacote.</p>
+        </SectionCard>
+      )}
 
       {wsTab === "tarefas" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1733,18 +1784,23 @@ function CaseWorkspace({
               </div>
             ))}
           </SectionCard>
-          <SectionCard title="Anotações">
-            {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
-            {caseNotes.map((n) => (
-              <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
-                <div><div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div><div style={{ fontSize: 13, color: INK }}>{n.content}</div></div>
-                <button onClick={() => onDeleteNote(n.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
-              </div>
-            ))}
-            <button onClick={onAddNote} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar anotação</button>
-          </SectionCard>
         </>
       )}
+
+      {wsTab === "anotacoes" && (
+        <SectionCard title="Anotações">
+          <p style={{ fontSize: 12, color: MUTED, margin: "0 0 10px" }}>Versão simples por enquanto — tipos, fixação e participantes chegam no item 3 do pacote.</p>
+          {caseNotes.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+          {caseNotes.map((n) => (
+            <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
+              <div><div style={{ fontSize: 11, color: "#9A917E" }}>{fmtDate(n.date)}</div><div style={{ fontSize: 13, color: INK }}>{n.content}</div></div>
+              <button onClick={() => onDeleteNote(n.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B" }}><Trash2 size={14} /></button>
+            </div>
+          ))}
+          <button onClick={onAddNote} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar anotação</button>
+        </SectionCard>
+      )}
+
 
       {wsTab === "financeiro" && (
         <>
