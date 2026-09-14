@@ -153,7 +153,7 @@ const CASE_TYPE_PALETTE = [
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code, nacionalidade: r.nacionalidade, estadoCivil: r.estado_civil, profissao: r.profissao, orgaoExpedidorRg: r.orgao_expedidor_rg, representanteLegal: r.representante_legal });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
-const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id });
+const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group, settledAt: r.settled_at });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
@@ -204,7 +204,7 @@ async function loadAll() {
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null, nacionalidade: row.nacionalidade || null, estado_civil: row.estadoCivil || null, profissao: row.profissao || null, orgao_expedidor_rg: row.orgaoExpedidorRg || null, representante_legal: row.representanteLegal || null };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
-  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null };
+  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null, time: row.time || null, location: row.location || null, google_synced: row.googleSynced || false };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
@@ -724,7 +724,7 @@ function SubmitRow({ onClose, onSubmit, submitLabel }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddAppt, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -869,6 +869,8 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
 
   if (modal === "task") {
     const [title, setTitle] = useState(editing?.title || taskPrefill?.title || ""); const [dueDate, setDueDate] = useState(editing?.dueDate || "");
+    const [time, setTime] = useState(editing?.time || "");
+    const [location, setLocation] = useState(editing?.location || "");
     const [notes, setNotes] = useState(editing?.notes || "");
     const [caseId, setCaseId] = useState(editing?.caseId || taskCaseId || "");
     const [recurrent, setRecurrent] = useState(false);
@@ -878,7 +880,20 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
     return (
       <Modal title={editing ? "Editar tarefa" : taskCaseId ? "Nova tarefa do caso" : "Nova tarefa"} onClose={onClose}>
         <Field label="Descrição"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Protocolar manifestação" /></Field>
-        <Field label="Prazo (opcional)"><input type="date" style={inputStyle} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><Field label="Data"><input type="date" style={inputStyle} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Hora (opcional)"><input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} /></Field></div>
+        </div>
+        {dueDate && (
+          <div style={{ background: "#F7F3E8", border: "1px solid #E6D9B4", borderRadius: 6, padding: "10px 12px", fontSize: 12.5, color: "#6b5a2e", marginBottom: 12 }}>
+            {time
+              ? `Com hora preenchida, entra na Agenda como compromisso de 1h em ${fmtDate(dueDate)}.`
+              : "Sem hora, entra como item do dia — não aparece com horário marcado na Agenda."}
+          </div>
+        )}
+        {time && (
+          <Field label="Local (opcional)"><input style={inputStyle} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Ex: Escritório, sala de reunião" /></Field>
+        )}
         {editing && (
           <Field label="Caso vinculado (opcional)">
             <select style={inputStyle} value={caseId} onChange={(e) => setCaseId(e.target.value)}>
@@ -922,26 +937,11 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Descreva a tarefa."); return; }
-          const base = { title: title.trim(), dueDate, notes, caseId: editing ? (caseId || null) : (taskCaseId || null), sourceNoteId: editing ? editing.sourceNoteId : (taskPrefill?.sourceNoteId || null) };
+          const base = { title: title.trim(), dueDate, time: time || null, location: time ? (location || null) : null, notes, caseId: editing ? (caseId || null) : (taskCaseId || null), sourceNoteId: editing ? editing.sourceNoteId : (taskPrefill?.sourceNoteId || null) };
           if (editing) { onEditTask(editing.id, base); return; }
           if (recurrent && dueDate && Number(times) > 1) onAddTaskRecurring(base, Number(every), unit, Number(times));
           else onAddTask(base);
         }} />
-      </Modal>
-    );
-  }
-
-  if (modal === "appt") {
-    const [title, setTitle] = useState(""); const [date, setDate] = useState(todayISO());
-    const [time, setTime] = useState(""); const [location, setLocation] = useState("");
-    return (
-      <Modal title="Novo compromisso" onClose={onClose}>
-        <Field label="Título"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Reunião com cliente" /></Field>
-        <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="Hora (opcional)"><input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} /></Field>
-        <Field label="Local (opcional)"><input style={inputStyle} value={location} onChange={(e) => setLocation(e.target.value)} /></Field>
-        {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
-        <SubmitRow onClose={onClose} onSubmit={() => { if (!title.trim() || !date) { setError("Informe título e data."); return; } onAddAppt({ title: title.trim(), date, time, location }); }} />
       </Modal>
     );
   }
@@ -2240,7 +2240,7 @@ function CaseFolder({
   );
 }
 
-function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onTokenAcquired, onSyncAll }) {
+function AgendaTab({ tasks, onDeleteTask, onAddTask, onTokenAcquired, onSyncAll }) {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [googleConnected, setGoogleConnected] = useState(false);
@@ -2250,10 +2250,12 @@ function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onToke
   const tokenRef = React.useRef(null);
   const tokenClientRef = React.useRef(null);
 
-  const apptItems = appts.map((a) => ({ kind: "Compromisso", date: a.date, id: a.id, title: a.title, extra: a.time || "", location: a.location, done: false }));
-  const taskItems = tasks.filter((t) => t.dueDate).map((t) => ({ kind: "Tarefa", date: t.dueDate, id: t.id, title: t.title, extra: "", location: "", done: t.done }));
+  const taskItems = tasks.filter((t) => t.dueDate).map((t) => ({
+    kind: t.time ? "Compromisso" : "Tarefa", date: t.dueDate, id: t.id, title: t.title,
+    extra: t.time || "", location: t.location || "", done: t.done, googleSynced: t.googleSynced,
+  }));
   const googleItems = googleEvents.map((g) => ({ kind: "Google", date: g.date, id: g.id, title: g.title, extra: g.time || "", location: "", done: false }));
-  const allItems = [...apptItems, ...taskItems, ...googleItems];
+  const allItems = [...taskItems, ...googleItems];
   const itemsByDate = {};
   allItems.forEach((it) => { (itemsByDate[it.date] = itemsByDate[it.date] || []).push(it); });
 
@@ -2320,14 +2322,14 @@ function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onToke
           }}>
             {googleConnected ? "Sincronizado com Google Agenda" : googleBusy ? "Conectando…" : "Conectar Google Agenda"}
           </button>
-          {googleConnected && appts.some((a) => !a.googleSynced) && (
+          {googleConnected && tasks.some((t) => t.time && !t.googleSynced) && (
             <button onClick={async () => { setSyncingAll(true); await onSyncAll(); setSyncingAll(false); }} disabled={syncingAll} style={{
               background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 12px", fontSize: 12, color: NAVY, cursor: "pointer",
             }}>
               {syncingAll ? "Sincronizando…" : "Sincronizar todos"}
             </button>
           )}
-          <AddButton onClick={onAddAppt} />
+          <AddButton onClick={onAddTask} />
         </div>
       </div>
 
@@ -2386,7 +2388,7 @@ function AgendaTab({ appts, tasks, onDeleteAppt, onDeleteTask, onAddAppt, onToke
         {dayItems.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nada agendado para este dia.</p>}
         {dayItems.map((it) => (
           <RowCard key={`${it.kind}-${it.id}`}
-            onDelete={it.kind === "Google" ? undefined : () => (it.kind === "Tarefa" ? onDeleteTask(it.id) : onDeleteAppt(it.id))}
+            onDelete={it.kind === "Google" ? undefined : () => onDeleteTask(it.id)}
             title={it.title}
             subtitle={`${it.extra || "dia todo"}${it.location ? " · " + it.location : ""}${it.done ? " · concluída" : ""}`}
             right={<span style={{
@@ -3134,34 +3136,34 @@ export default function RSACApp() {
     setModal("task");
   }, []);
 
-  const addApptAndSync = useCallback(async (values) => {
-    const saved = await insertRow("appts", values);
+  const addTaskWithSync = useCallback(async (values) => {
+    const saved = await insertRow("tasks", values);
     if (!saved) return;
-    setAppts((prev) => [...prev, saved]);
-    if (googleToken) {
-      const ok = await pushEventToGoogle(googleToken, saved);
+    setTasks((prev) => [...prev, saved]);
+    if (saved.time && googleToken) {
+      const ok = await pushEventToGoogle(googleToken, { title: saved.title, date: saved.dueDate, time: saved.time, location: saved.location });
       if (ok) {
-        const updated = await editRow("appts", saved.id, { ...saved, googleSynced: true });
-        if (updated) setAppts((prev) => prev.map((a) => a.id === saved.id ? updated : a));
+        const updated = await editRow("tasks", saved.id, { ...saved, googleSynced: true });
+        if (updated) setTasks((prev) => prev.map((t) => t.id === saved.id ? updated : t));
       }
     }
   }, [googleToken]);
 
-  const syncAllAppts = useCallback(async () => {
+  const syncAllTasks = useCallback(async () => {
     if (!googleToken) return { total: 0, ok: 0 };
-    const pending = appts.filter((a) => !a.googleSynced);
+    const pending = tasks.filter((t) => t.time && !t.googleSynced);
     let okCount = 0;
-    for (const a of pending) {
-      const ok = await pushEventToGoogle(googleToken, a, true);
+    for (const t of pending) {
+      const ok = await pushEventToGoogle(googleToken, { title: t.title, date: t.dueDate, time: t.time, location: t.location }, true);
       if (ok) {
         okCount++;
-        const updated = await editRow("appts", a.id, { ...a, googleSynced: true });
-        if (updated) setAppts((prev) => prev.map((x) => x.id === a.id ? updated : x));
+        const updated = await editRow("tasks", t.id, { ...t, googleSynced: true });
+        if (updated) setTasks((prev) => prev.map((x) => x.id === t.id ? updated : x));
       }
     }
     alert(`Sincronização concluída: ${okCount} de ${pending.length} compromisso(s) enviados ao Google Agenda.`);
     return { total: pending.length, ok: okCount };
-  }, [googleToken, appts]);
+  }, [googleToken, tasks]);
 
   const removeRow = useCallback(async (key, id) => {
     setters[key]((prev) => prev.filter((r) => r.id !== id));
@@ -3249,7 +3251,11 @@ export default function RSACApp() {
 
   const openTasks = tasks.filter((t) => !t.done).length;
   const activeCases = cases.filter((c) => c.status === "Ativo").length;
-  const upcomingAppts = [...appts].filter((a) => a.date >= todayISO()).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
+  const upcomingAppts = tasks
+    .filter((t) => t.time && t.dueDate && t.dueDate >= todayISO())
+    .map((t) => ({ id: t.id, date: t.dueDate, title: t.title, time: t.time, location: t.location }))
+    .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")))
+    .slice(0, 5);
   const recentCases = [...cases].slice(-6).reverse();
   const receitas = finance.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount || 0), 0);
   const despesas = finance.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount || 0), 0);
@@ -3336,7 +3342,7 @@ export default function RSACApp() {
     const floatingAddAction = {
       cases: () => { setEditingCase(null); setModal("case"); },
       tasks: () => { setEditingTask(null); setFolderCaseId(null); setModal("task"); },
-      calendar: () => setModal("appt"),
+      calendar: () => { setEditingTask(null); setFolderCaseId(null); setModal("task"); },
     }[mobileTab];
 
     return (
@@ -3378,12 +3384,11 @@ export default function RSACApp() {
             )}
             {mobileTab === "calendar" && (
               <div style={{ padding: "16px 18px 100px" }}>
-                <AgendaTab appts={appts} tasks={tasks}
-                  onDeleteAppt={(id) => removeRow("appts", id)}
+                <AgendaTab tasks={tasks}
                   onDeleteTask={(id) => removeRow("tasks", id)}
-                  onAddAppt={() => setModal("appt")}
+                  onAddTask={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }}
                   onTokenAcquired={setGoogleToken}
-                  onSyncAll={syncAllAppts} />
+                  onSyncAll={syncAllTasks} />
               </div>
             )}
             {mobileTab === "finance" && (
@@ -3442,18 +3447,18 @@ export default function RSACApp() {
         )}
 
         {modal && (
-          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); }} clients={clients} cases={cases} prefill={prefillClient}
+          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); }} clients={clients} cases={cases} prefill={prefillClient}
             editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
             taskCaseId={folderCaseId}
+            taskPrefill={taskPrefill}
             financeContext={financeContext}
             onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
             onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
             onAddCase={(v) => { addRow("cases", v); setModal(null); }}
             onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
-            onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); }}
+            onAddTask={(v) => { addTaskWithSync(v); setModal(null); setFolderCaseId(null); setTaskPrefill(null); }}
             onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
             onAddTaskRecurring={(v, every, unit, times) => { addTaskRecurring(v, every, unit, times); setModal(null); setFolderCaseId(null); }}
-            onAddAppt={(v) => { addApptAndSync(v); setModal(null); }}
             onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
             onEditFinance={(id, v) => { editFinanceRow(id, v); setModal(null); setEditingFinance(null); }}
             onAddFinanceRecurring={(v, months) => { addFinanceRecurring(v, months); setModal(null); setFinanceContext(null); }}
@@ -3592,7 +3597,7 @@ export default function RSACApp() {
               <StatCard icon={Users} label="Contatos" value={clients.length} />
               <StatCard icon={Briefcase} label="Casos ativos" value={activeCases} />
               <StatCard icon={CheckSquare} label="Tarefas em aberto" value={openTasks} />
-              <StatCard icon={CalendarIcon} label="Compromissos" value={appts.length} />
+              <StatCard icon={CalendarIcon} label="Compromissos" value={tasks.filter((t) => t.time).length} />
             </div>
             <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
               <div style={{ flex: "2 1 320px", background: "#fff", border: "1px solid #EAE7DC", borderRadius: 10, padding: 20 }}>
@@ -3828,12 +3833,11 @@ export default function RSACApp() {
         )}
 
         {tab === "calendar" && (
-          <AgendaTab appts={appts} tasks={tasks}
-            onDeleteAppt={(id) => removeRow("appts", id)}
+          <AgendaTab tasks={tasks}
             onDeleteTask={(id) => removeRow("tasks", id)}
-            onAddAppt={() => setModal("appt")}
+            onAddTask={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }}
             onTokenAcquired={setGoogleToken}
-            onSyncAll={syncAllAppts} />
+            onSyncAll={syncAllTasks} />
         )}
 
         {tab === "finance" && (
@@ -3865,10 +3869,9 @@ export default function RSACApp() {
           onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
           onAddCase={(v) => { addRow("cases", v); setModal(null); }}
           onEditCase={(id, v) => { editCaseRow(id, v); setModal(null); setEditingCase(null); }}
-          onAddTask={(v) => { addRow("tasks", v); setModal(null); setFolderCaseId(null); setTaskPrefill(null); }}
+          onAddTask={(v) => { addTaskWithSync(v); setModal(null); setFolderCaseId(null); setTaskPrefill(null); }}
           onAddTaskRecurring={(v, every, unit, times) => { addTaskRecurring(v, every, unit, times); setModal(null); setFolderCaseId(null); }}
           onEditTask={(id, v) => { editTaskRow(id, v); setModal(null); setEditingTask(null); }}
-          onAddAppt={(v) => { addApptAndSync(v); setModal(null); }}
           onAddFinance={(v) => { addRow("finance", v); setModal(null); setFinanceContext(null); }}
           onEditFinance={(id, v) => { editFinanceRow(id, v); setModal(null); setEditingFinance(null); }}
           onAddFinanceRecurring={(v, months) => { addFinanceRecurring(v, months); setModal(null); setFinanceContext(null); }}
