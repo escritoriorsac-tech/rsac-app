@@ -367,6 +367,16 @@ function contractVigenciaPct(contract, status) {
   return Math.round((elapsed / total) * 100);
 }
 
+// Escolhe o contrato a exibir na faixa do caso: prioriza ativo/a vencer sobre suspenso/encerrado
+function getCaseContract(caseId, contracts, contractCaseIds) {
+  const linked = contracts.filter((c) => (contractCaseIds[c.id] || []).includes(caseId));
+  if (linked.length === 0) return null;
+  const withStatus = linked.map((c) => ({ c, status: deriveContractStatus(c) }));
+  const priority = { expiring: 0, active: 1, suspended: 2, ended: 3 };
+  withStatus.sort((a, b) => priority[a.status] - priority[b.status]);
+  return withStatus[0].c;
+}
+
 function Logo({ dark = true, size = "normal" }) {
   const big = size === "big";
   return (
@@ -879,7 +889,7 @@ function CaseTasksWeekView({ tasks, onEditTask }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent, caseTypesCatalog, contractCaseIds, contractTypesByContractId, onAddContract, onEditContract }) {
+function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent, caseTypesCatalog, contractCaseIds, contractTypesByContractId, onAddContract, onEditContract, contractPrefillCaseId }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -1033,7 +1043,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
     const [monthlyFee, setMonthlyFee] = useState(editing?.monthlyFee ?? "");
     const [successFeeLabel, setSuccessFeeLabel] = useState(editing?.successFeeLabel || "");
     const [autoRenew, setAutoRenew] = useState(editing?.autoRenew || false);
-    const [caseIds, setCaseIds] = useState(editing ? (contractCaseIds[editing.id] || []) : []);
+    const [caseIds, setCaseIds] = useState(editing ? (contractCaseIds[editing.id] || []) : (contractPrefillCaseId ? [contractPrefillCaseId] : []));
     const [typeIds, setTypeIds] = useState(editing ? (contractTypesByContractId[editing.id] || []).map((t) => t.id) : []);
     return (
       <Modal title={editing ? "Editar contrato" : "Novo contrato"} onClose={onClose}>
@@ -1810,6 +1820,7 @@ function MobileCaseScreen({
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
   onEditNoteContent, onTogglePinNote, onCreateTaskFromNote, onAddNoteRich,
+  contracts, contractCaseIds, onEditContract, onLinkContract,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
   const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
@@ -1885,17 +1896,142 @@ function MobileCaseScreen({
       </div>
 
       <div style={{ padding: "18px 18px 0" }}>
-        {wsTab === "visao-geral" && (
-          <SectionCard title="Visão geral">
-            <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a faixa de contrato ativo, tarefas recentes e última anotação chegam junto com os itens 3 (Anotações) e 5 (Contratos) do pacote.</p>
-          </SectionCard>
-        )}
+        {wsTab === "visao-geral" && (() => {
+          const caseContract = getCaseContract(item.id, contracts, contractCaseIds);
+          const contractStatus = caseContract ? deriveContractStatus(caseContract) : null;
+          const openT = caseTasks.filter((t) => !t.done).sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999"));
+          const doneT = caseTasks.filter((t) => t.done).sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || ""));
+          const nextTasks = [...openT, ...doneT].slice(0, 3);
+          const latestNote = caseNotes.slice().sort((a, b) => (b.occurredAt || b.date || "").localeCompare(a.occurredAt || a.date || ""))[0];
+          const partyIds = new Set();
+          caseNotes.forEach((n) => (n.participantIds || []).forEach((pid) => partyIds.add(pid)));
+          const parties = [client, ...clients.filter((c) => partyIds.has(c.id) && c.id !== client?.id)].filter(Boolean);
+          const nextAppt = caseTasks.filter((t) => t.time && t.dueDate >= todayISO()).sort((a, b) => (a.dueDate + a.time).localeCompare(b.dueDate + b.time))[0];
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {caseContract ? (
+                <div onClick={() => setWsTab("contrato")} style={{ background: SIDEBAR_NAVY, borderRadius: 10, padding: "18px 20px", cursor: "pointer" }}>
+                  <div style={{ fontSize: 10.5, letterSpacing: "0.1em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 8 }}>Contrato ativo</div>
+                  <div style={{ fontSize: 16, color: "#f5efe4", marginBottom: 10 }}>{caseContract.title}</div>
+                  <div style={{ height: 6, borderRadius: 3, background: "rgba(240,234,221,0.16)", overflow: "hidden", marginBottom: 8 }}>
+                    {contractStatus === "suspended" ? (
+                      <div style={{ width: "100%", height: "100%", background: "rgba(240,234,221,0.3)" }} />
+                    ) : !caseContract.endDate ? (
+                      <div style={{ width: "100%", height: "100%", background: "repeating-linear-gradient(45deg, rgba(201,162,39,0.5) 0 5px, rgba(240,234,221,0.16) 5px 10px)" }} />
+                    ) : (
+                      <div style={{ width: `${contractVigenciaPct(caseContract, contractStatus)}%`, height: "100%", background: "#c9a227" }} />
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "rgba(240,234,221,0.7)", marginBottom: 14 }}>
+                    {fmtDate(caseContract.startDate)} → {caseContract.endDate ? fmtDate(caseContract.endDate) : "prazo indeterminado"} · {contractVigenciaLabel(caseContract, contractStatus)}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid rgba(232,226,213,0.16)", paddingTop: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 10, letterSpacing: "0.08em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 4 }}>Honorários</div>
+                      <div style={{ fontFamily: "Georgia, serif", fontSize: 22, color: "#f5efe4" }}>{fmtBRL(caseContract.monthlyFee)}<span style={{ fontSize: 12, color: "rgba(240,234,221,0.6)" }}>/mês</span></div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 10, letterSpacing: "0.08em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 4 }}>Próximo compromisso</div>
+                      {nextAppt ? (
+                        <div style={{ fontSize: 12.5, color: "#c9a227" }}>{fmtDate(nextAppt.dueDate)}, {nextAppt.time}</div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: "rgba(240,234,221,0.7)" }}>nenhum agendado</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div onClick={onLinkContract} style={{ background: "#f4f0e5", border: "1px solid #e6e0d2", borderRadius: 8, padding: "14px 16px", cursor: "pointer" }}>
+                  <div style={{ fontSize: 13, color: MUTED, marginBottom: 4 }}>Nenhum contrato vinculado a este caso.</div>
+                  <div style={{ fontSize: 13, color: NAVY, fontWeight: 600 }}>Vincular contrato</div>
+                </div>
+              )}
 
-        {wsTab === "contrato" && (
-          <SectionCard title="Contrato">
-            <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a gestão de contratos (vigência, honorários, renovação) chega no item 5 do pacote.</p>
-          </SectionCard>
-        )}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <h3 style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY, margin: 0 }}>Tarefas e compromissos</h3>
+                  <span onClick={() => setWsTab("tarefas")} style={{ fontSize: 12, color: NAVY }}>Ver todas</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {nextTasks.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma tarefa neste caso.</p>}
+                  {nextTasks.map((t) => (
+                    <div key={t.id} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "12px 14px", opacity: t.done ? 0.72 : 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                        <span style={{ fontSize: 13.5, color: INK, textDecoration: t.done ? "line-through" : "none" }}>{t.title}</span>
+                        {t.dueDate && <span style={{ fontSize: 10.5, color: "#8a6d3b", background: "#f4ecd8", borderRadius: 20, padding: "2px 7px", whiteSpace: "nowrap" }}>▦ na agenda</span>}
+                      </div>
+                      {t.dueDate && <div style={{ fontSize: 11.5, color: MUTED, marginTop: 3 }}>{fmtDate(t.dueDate)}{t.time ? `, ${t.time}` : ""}</div>}
+                      {t.done && t.notes && <div style={{ fontSize: 12, color: "#6b6455", background: "#f1ede2", borderRadius: 6, padding: "7px 9px", marginTop: 8 }}>Solução: {t.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "14px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <h3 style={{ fontFamily: "Georgia, serif", fontSize: 14.5, color: NAVY, margin: 0 }}>Última anotação</h3>
+                  <span onClick={() => setWsTab("anotacoes")} style={{ fontSize: 11.5, color: NAVY }}>Ver {caseNotes.length}</span>
+                </div>
+                {latestNote ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 600, padding: "3px 8px", borderRadius: 20, background: noteTypeMeta(latestNote.type).bg, color: "#12283f" }}>{noteTypeMeta(latestNote.type).label}</span>
+                      <span style={{ fontSize: 11.5, color: "#857d6c" }}>{fmtDateTime(latestNote.occurredAt || latestNote.date)}</span>
+                    </div>
+                    <p style={{ fontSize: 13, lineHeight: 1.5, color: INK, margin: 0 }}>{latestNote.content}</p>
+                  </>
+                ) : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+              </div>
+
+              <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "14px 16px" }}>
+                <h3 style={{ fontFamily: "Georgia, serif", fontSize: 14.5, color: NAVY, margin: "0 0 10px" }}>Partes</h3>
+                {parties.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum contato vinculado.</p>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {parties.map((p) => (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#e8e1d2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, fontWeight: 600, color: "#12283f", flexShrink: 0 }}>
+                        {p.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13.5, color: INK }}>{p.name}</div>
+                        <div style={{ fontSize: 11.5, color: "#857d6c" }}>{(p.contactType || "").toLowerCase()}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {wsTab === "contrato" && (() => {
+          const linkedContracts = contracts.filter((c) => (contractCaseIds[c.id] || []).includes(item.id));
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {linkedContracts.length === 0 && <Empty text="Nenhum contrato vinculado a este caso." />}
+              {linkedContracts.map((c) => {
+                const status = deriveContractStatus(c);
+                const pill = CONTRACT_STATUS_META[status];
+                return (
+                  <div key={c.id} onClick={() => onEditContract(c)} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px", cursor: "pointer" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontSize: 15, color: "#23201a", marginBottom: 4 }}>{c.title}</div>
+                        <div style={{ fontSize: 12.5, color: "#857d6c" }}>{fmtDate(c.startDate)} → {c.endDate ? fmtDate(c.endDate) : "prazo indeterminado"} · {contractVigenciaLabel(c, status)}</div>
+                      </div>
+                      <span style={{ fontSize: 11.5, fontWeight: 600, padding: "4px 9px", borderRadius: 20, background: pill.bg, color: pill.color }}>{pill.label}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 12 }}>
+                      <div style={{ fontFamily: "Georgia, serif", fontSize: 19, color: "#23201a" }}>{fmtBRL(c.monthlyFee)}<span style={{ fontSize: 12, color: "#857d6c" }}>/mês</span></div>
+                      {c.successFeeLabel && <div style={{ fontSize: 12, color: "#8a6d3b" }}>{c.successFeeLabel}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+              <button onClick={onLinkContract} style={{ alignSelf: "flex-start", background: "none", border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 16px", fontSize: 13, color: NAVY, cursor: "pointer" }}>+ Vincular novo contrato</button>
+            </div>
+          );
+        })()}
 
         {wsTab === "tarefas" && (
           <div>
@@ -2093,6 +2229,7 @@ function CaseWorkspace({
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
   onEditNoteContent, onTogglePinNote, onCreateTaskFromNote, onAddNoteRich,
+  contracts, contractCaseIds, onEditContract, onLinkContract,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
   const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
@@ -2175,17 +2312,151 @@ function CaseWorkspace({
         })}
       </div>
 
-      {wsTab === "visao-geral" && (
-        <SectionCard title="Visão geral">
-          <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a faixa de contrato ativo, tarefas recentes e última anotação chegam junto com os itens 3 (Anotações) e 5 (Contratos) do pacote.</p>
-        </SectionCard>
-      )}
+      {wsTab === "visao-geral" && (() => {
+        const caseContract = getCaseContract(item.id, contracts, contractCaseIds);
+        const contractStatus = caseContract ? deriveContractStatus(caseContract) : null;
+        const openT = caseTasks.filter((t) => !t.done).sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999"));
+        const doneT = caseTasks.filter((t) => t.done).sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || ""));
+        const nextTasks = [...openT, ...doneT].slice(0, 3);
+        const latestNote = caseNotes.slice().sort((a, b) => (b.occurredAt || b.date || "").localeCompare(a.occurredAt || a.date || ""))[0];
+        const partyIds = new Set();
+        caseNotes.forEach((n) => (n.participantIds || []).forEach((pid) => partyIds.add(pid)));
+        const parties = [client, ...clients.filter((c) => partyIds.has(c.id) && c.id !== client?.id)].filter(Boolean);
+        const nextAppt = caseTasks.filter((t) => t.time && t.dueDate >= todayISO()).sort((a, b) => (a.dueDate + a.time).localeCompare(b.dueDate + b.time))[0];
+        return (
+          <>
+            {caseContract ? (
+              <div onClick={() => setWsTab("contrato")} style={{ background: SIDEBAR_NAVY, borderRadius: 10, padding: "22px 26px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginBottom: 18, cursor: "pointer" }}>
+                <div style={{ borderRight: "1px solid rgba(232,226,213,0.16)", paddingRight: 20 }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 8 }}>Contrato ativo</div>
+                  <div style={{ fontSize: 17, color: "#f5efe4", marginBottom: 10 }}>{caseContract.title}</div>
+                  <div style={{ height: 6, borderRadius: 3, background: "rgba(240,234,221,0.16)", overflow: "hidden", marginBottom: 8 }}>
+                    {contractStatus === "suspended" ? (
+                      <div style={{ width: "100%", height: "100%", background: "rgba(240,234,221,0.3)" }} />
+                    ) : !caseContract.endDate ? (
+                      <div style={{ width: "100%", height: "100%", background: "repeating-linear-gradient(45deg, rgba(201,162,39,0.5) 0 5px, rgba(240,234,221,0.16) 5px 10px)" }} />
+                    ) : (
+                      <div style={{ width: `${contractVigenciaPct(caseContract, contractStatus)}%`, height: "100%", background: "#c9a227" }} />
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(240,234,221,0.7)" }}>
+                    {fmtDate(caseContract.startDate)} → {caseContract.endDate ? fmtDate(caseContract.endDate) : "prazo indeterminado"} · {contractVigenciaLabel(caseContract, contractStatus)}
+                  </div>
+                </div>
+                <div style={{ borderRight: "1px solid rgba(232,226,213,0.16)", padding: "0 20px" }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 8 }}>Honorários</div>
+                  <div style={{ fontFamily: "Georgia, serif", fontSize: 30, color: "#f5efe4" }}>{fmtBRL(caseContract.monthlyFee)}<span style={{ fontSize: 16, color: "rgba(240,234,221,0.6)" }}>/mês</span></div>
+                  <div style={{ fontSize: 12, color: "rgba(240,234,221,0.7)", marginTop: 4 }}>{caseContract.successFeeLabel || "sem êxito"}</div>
+                </div>
+                <div style={{ paddingLeft: 20 }}>
+                  <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 8 }}>Próximo compromisso</div>
+                  {nextAppt ? (
+                    <>
+                      <div style={{ fontSize: 17, color: "#c9a227", marginBottom: 4 }}>{nextAppt.title}</div>
+                      <div style={{ fontSize: 12, color: "rgba(240,234,221,0.7)" }}>{fmtDate(nextAppt.dueDate)}, {nextAppt.time} · já na agenda</div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, color: "rgba(240,234,221,0.7)", marginBottom: 4 }}>nenhum compromisso agendado</div>
+                      <span onClick={(e) => { e.stopPropagation(); onAddTask(); }} style={{ fontSize: 12, color: "#c9a227", cursor: "pointer" }}>Agendar</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div onClick={onLinkContract} style={{ background: "#f4f0e5", border: "1px solid #e6e0d2", borderRadius: 8, padding: "14px 18px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                <span style={{ fontSize: 13.5, color: MUTED }}>Nenhum contrato vinculado a este caso.</span>
+                <span style={{ fontSize: 13, color: NAVY, fontWeight: 600 }}>Vincular contrato</span>
+              </div>
+            )}
 
-      {wsTab === "contrato" && (
-        <SectionCard title="Contrato">
-          <p style={{ fontSize: 13.5, color: MUTED, margin: 0 }}>Em construção — a gestão de contratos (vigência, honorários, renovação) chega no item 5 do pacote.</p>
-        </SectionCard>
-      )}
+            <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 16 }}>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <h3 style={{ fontFamily: "Georgia, serif", fontSize: 16, color: NAVY, margin: 0 }}>Tarefas e compromissos</h3>
+                  <span onClick={() => setWsTab("tarefas")} style={{ fontSize: 12.5, color: NAVY, cursor: "pointer" }}>Ver todas</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {nextTasks.length === 0 && <p style={{ fontSize: 13, color: MUTED }}>Nenhuma tarefa neste caso.</p>}
+                  {nextTasks.map((t) => (
+                    <div key={t.id} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "14px 16px", opacity: t.done ? 0.72 : 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <span style={{ fontSize: 14, color: INK, textDecoration: t.done ? "line-through" : "none" }}>{t.title}</span>
+                        {t.dueDate && <span style={{ fontSize: 11, color: "#8a6d3b", background: "#f4ecd8", borderRadius: 20, padding: "2px 8px", whiteSpace: "nowrap" }}>▦ na agenda</span>}
+                      </div>
+                      {t.dueDate && <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>{fmtDate(t.dueDate)}{t.time ? `, ${t.time}` : ""}</div>}
+                      {t.done && t.notes && <div style={{ fontSize: 12.5, color: "#6b6455", background: "#f1ede2", borderRadius: 6, padding: "8px 10px", marginTop: 8 }}>Solução: {t.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <h3 style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY, margin: 0 }}>Última anotação</h3>
+                    <span onClick={() => setWsTab("anotacoes")} style={{ fontSize: 12, color: NAVY, cursor: "pointer" }}>Ver {caseNotes.length}</span>
+                  </div>
+                  {latestNote ? (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 20, background: noteTypeMeta(latestNote.type).bg, color: "#12283f" }}>{noteTypeMeta(latestNote.type).label}</span>
+                        <span style={{ fontSize: 12, color: "#857d6c" }}>{fmtDateTime(latestNote.occurredAt || latestNote.date)} · {latestNote.authorName || "—"}</span>
+                      </div>
+                      <p style={{ fontSize: 14, lineHeight: 1.55, color: INK, margin: 0 }}>{latestNote.content}</p>
+                    </>
+                  ) : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px" }}>
+                  <h3 style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY, margin: "0 0 12px" }}>Partes</h3>
+                  {parties.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum contato vinculado.</p>}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {parties.map((p) => (
+                      <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#e8e1d2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, color: "#12283f", flexShrink: 0 }}>
+                          {p.name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 14, color: INK }}>{p.name}</div>
+                          <div style={{ fontSize: 12, color: "#857d6c" }}>{(p.contactType || "").toLowerCase()}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
+      {wsTab === "contrato" && (() => {
+        const linkedContracts = contracts.filter((c) => (contractCaseIds[c.id] || []).includes(item.id));
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {linkedContracts.length === 0 && <Empty text="Nenhum contrato vinculado a este caso." />}
+            {linkedContracts.map((c) => {
+              const status = deriveContractStatus(c);
+              const pill = CONTRACT_STATUS_META[status];
+              return (
+                <div key={c.id} onClick={() => onEditContract(c)} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "18px 20px", cursor: "pointer" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <div style={{ fontSize: 16, color: "#23201a", marginBottom: 4 }}>{c.title}</div>
+                      <div style={{ fontSize: 13, color: "#857d6c" }}>{fmtDate(c.startDate)} → {c.endDate ? fmtDate(c.endDate) : "prazo indeterminado"} · {contractVigenciaLabel(c, status)}</div>
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: pill.bg, color: pill.color }}>{pill.label}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 12 }}>
+                    <div style={{ fontFamily: "Georgia, serif", fontSize: 21, color: "#23201a" }}>{fmtBRL(c.monthlyFee)}<span style={{ fontSize: 13, color: "#857d6c" }}>/mês</span></div>
+                    {c.successFeeLabel && <div style={{ fontSize: 12.5, color: "#8a6d3b" }}>{c.successFeeLabel}</div>}
+                  </div>
+                </div>
+              );
+            })}
+            <button onClick={onLinkContract} style={{ alignSelf: "flex-start", background: "none", border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 16px", fontSize: 13, color: NAVY, cursor: "pointer" }}>+ Vincular novo contrato</button>
+          </div>
+        );
+      })()}
 
       {wsTab === "tarefas" && (
         <div>
@@ -3475,6 +3746,7 @@ export default function RSACApp() {
   const [contractCaseIds, setContractCaseIds] = useState({});
   const [contractTypesByContractId, setContractTypesByContractId] = useState({});
   const [editingContract, setEditingContract] = useState(null);
+  const [contractPrefillCaseId, setContractPrefillCaseId] = useState(null);
   const [currentUserName, setCurrentUserName] = useState("Você");
   const [taskPrefill, setTaskPrefill] = useState(null);
 
@@ -3846,7 +4118,10 @@ export default function RSACApp() {
             onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)}
             onEditNoteContent={handleEditNoteContent} onTogglePinNote={handleTogglePinNote}
             onCreateTaskFromNote={handleCreateTaskFromNote}
-            onAddNoteRich={(values) => handleAddNote(wsCase.id, values)} />
+            onAddNoteRich={(values) => handleAddNote(wsCase.id, values)}
+            contracts={contracts} contractCaseIds={contractCaseIds}
+            onEditContract={(c) => { setEditingContract(c); setModal("contract"); }}
+            onLinkContract={() => { setContractPrefillCaseId(wsCase.id); setEditingContract(null); setModal("contract"); }} />
         ) : (
           <>
             {mobileTab === "cases" && (
@@ -3932,12 +4207,12 @@ export default function RSACApp() {
         )}
 
         {modal && (
-          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); setEditingContract(null); }} clients={clients} cases={cases} prefill={prefillClient}
+          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); setEditingContract(null); setContractPrefillCaseId(null); }} clients={clients} cases={cases} prefill={prefillClient}
             editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : modal === "contract" ? editingContract : null}
             taskCaseId={folderCaseId}
             taskPrefill={taskPrefill}
             financeContext={financeContext}
-            caseTypesCatalog={caseTypesCatalog} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
+            caseTypesCatalog={caseTypesCatalog} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId} contractPrefillCaseId={contractPrefillCaseId}
             onAddContract={(v, caseIds, typeIds) => { handleAddContract(v, caseIds, typeIds); setModal(null); }}
             onEditContract={(id, v, caseIds, typeIds) => { handleEditContract(id, v, caseIds, typeIds); setModal(null); setEditingContract(null); }}
             onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
@@ -4072,7 +4347,10 @@ export default function RSACApp() {
                 onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)}
                 onEditNoteContent={handleEditNoteContent} onTogglePinNote={handleTogglePinNote}
                 onCreateTaskFromNote={handleCreateTaskFromNote}
-                onAddNoteRich={(values) => handleAddNote(wsCase.id, values)} />
+                onAddNoteRich={(values) => handleAddNote(wsCase.id, values)}
+                contracts={contracts} contractCaseIds={contractCaseIds}
+                onEditContract={(c) => { setEditingContract(c); setModal("contract"); }}
+                onLinkContract={() => { setContractPrefillCaseId(wsCase.id); setEditingContract(null); setModal("contract"); }} />
             );
           })()
         ) : (
@@ -4358,12 +4636,12 @@ export default function RSACApp() {
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); setEditingContract(null); }} clients={clients} cases={cases} prefill={prefillClient}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); setEditingContract(null); setContractPrefillCaseId(null); }} clients={clients} cases={cases} prefill={prefillClient}
           editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : modal === "contract" ? editingContract : null}
           taskCaseId={folderCaseId}
           taskPrefill={taskPrefill}
           financeContext={financeContext}
-          caseTypesCatalog={caseTypesCatalog} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
+          caseTypesCatalog={caseTypesCatalog} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId} contractPrefillCaseId={contractPrefillCaseId}
           onAddContract={(v, caseIds, typeIds) => { handleAddContract(v, caseIds, typeIds); setModal(null); }}
           onEditContract={(id, v, caseIds, typeIds) => { handleEditContract(id, v, caseIds, typeIds); setModal(null); setEditingContract(null); }}
           onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
