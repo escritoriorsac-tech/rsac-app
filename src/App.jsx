@@ -3,7 +3,7 @@ import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
-  Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check
+  Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check, FileText
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -152,7 +152,7 @@ const CASE_TYPE_PALETTE = [
 
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code, nacionalidade: r.nacionalidade, estadoCivil: r.estado_civil, profissao: r.profissao, orgaoExpedidorRg: r.orgao_expedidor_rg, representanteLegal: r.representante_legal });
-const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado });
+const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado, honorariosSucumbencia: r.honorarios_sucumbencia });
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group, settledAt: r.settled_at });
@@ -165,17 +165,24 @@ const toNote = (r) => ({
 });
 const toDoc = (r) => ({ id: r.id, caseId: r.case_id, name: r.name, driveLink: r.drive_link });
 const toPrecedent = (r) => ({ id: r.id, judgeId: r.judge_id, description: r.description, driveLink: r.drive_link });
+const toContract = (r) => ({
+  id: r.id, title: r.title, clientId: r.client_id,
+  startDate: r.start_date, endDate: r.end_date,
+  monthlyFee: r.monthly_fee, successFeeLabel: r.success_fee_label,
+  autoRenew: r.auto_renew, suspendedSince: r.suspended_since,
+  createdAt: r.created_at,
+});
 
 const TABLE_BY_KEY = {
   clients: "clients", cases: "cases", tasks: "tasks",
   appts: "appointments", finance: "finance_entries",
   events: "case_events", notes: "case_notes", documents: "case_documents",
-  precedents: "judge_precedents",
+  precedents: "judge_precedents", contracts: "contracts",
 };
-const MAPPER_BY_KEY = { clients: toClient, cases: toCase, tasks: toTask, appts: toAppt, finance: toFinance, events: toEvent, notes: toNote, documents: toDoc, precedents: toPrecedent };
+const MAPPER_BY_KEY = { clients: toClient, cases: toCase, tasks: toTask, appts: toAppt, finance: toFinance, events: toEvent, notes: toNote, documents: toDoc, precedents: toPrecedent, contracts: toContract };
 
 async function loadAll() {
-  const [c, cs, t, a, f, ev, no, doc, pr, fs] = await Promise.all([
+  const [c, cs, t, a, f, ev, no, doc, pr, fs, ct] = await Promise.all([
     supabase.from("clients").select("*").order("created_at"),
     supabase.from("cases").select("*").order("created_at"),
     supabase.from("tasks").select("*").order("created_at"),
@@ -186,6 +193,7 @@ async function loadAll() {
     supabase.from("case_documents").select("*").order("created_at"),
     supabase.from("judge_precedents").select("*").order("created_at"),
     supabase.from("finance_settings").select("*").eq("id", 1).maybeSingle(),
+    supabase.from("contracts").select("*").order("created_at"),
   ]);
   return {
     clients: (c.data || []).map(toClient),
@@ -198,12 +206,13 @@ async function loadAll() {
     documents: (doc.data || []).map(toDoc),
     precedents: (pr.data || []).map(toPrecedent),
     monthlyGoal: fs.data?.monthly_goal || 0,
+    contracts: (ct.data || []).map(toContract),
   };
 }
 
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null, nacionalidade: row.nacionalidade || null, estado_civil: row.estadoCivil || null, profissao: row.profissao || null, orgao_expedidor_rg: row.orgaoExpedidorRg || null, representante_legal: row.representanteLegal || null };
-  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null };
+  if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null, honorarios_sucumbencia: row.honorariosSucumbencia || null };
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null, time: row.time || null, location: row.location || null, google_synced: row.googleSynced || false };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
@@ -215,6 +224,12 @@ function toPayload(key, row) {
     participant_ids: row.participantIds || [], updated_at: row.updatedAt || null,
   };
   if (key === "precedents") return { judge_id: row.judgeId, description: row.description, drive_link: row.driveLink || null };
+  if (key === "contracts") return {
+    title: row.title, client_id: row.clientId,
+    start_date: row.startDate, end_date: row.endDate || null,
+    monthly_fee: row.monthlyFee || 0, success_fee_label: row.successFeeLabel || null,
+    auto_renew: row.autoRenew || false, suspended_since: row.suspendedSince || null,
+  };
   if (key === "documents") return { case_id: row.caseId, name: row.name, drive_link: row.driveLink || null };
   return row;
 }
@@ -275,6 +290,81 @@ async function linkCaseType(caseId, typeId) {
 async function unlinkCaseType(caseId, typeId) {
   const { error } = await supabase.from("case_case_types").delete().eq("case_id", caseId).eq("case_type_id", typeId);
   if (error) console.error(error);
+}
+
+// --- Contratos: relações (casos vinculados + tipos), status derivado e vigência ---
+async function fetchContractRelations() {
+  const [casesRes, typesRes] = await Promise.all([
+    supabase.from("contract_cases").select("contract_id, case_id"),
+    supabase.from("contract_types").select("contract_id, case_types(id, name, bg_color, border_color)"),
+  ]);
+  const caseIdsByContract = {};
+  (casesRes.data || []).forEach((row) => {
+    (caseIdsByContract[row.contract_id] = caseIdsByContract[row.contract_id] || []).push(row.case_id);
+  });
+  const typesByContract = {};
+  (typesRes.data || []).forEach((row) => {
+    if (!row.case_types) return;
+    (typesByContract[row.contract_id] = typesByContract[row.contract_id] || []).push(toCaseType(row.case_types));
+  });
+  return { caseIdsByContract, typesByContract };
+}
+
+async function linkContractCase(contractId, caseId) {
+  const { error } = await supabase.from("contract_cases").insert([{ contract_id: contractId, case_id: caseId }]);
+  if (error) console.error(error);
+}
+async function unlinkContractCase(contractId, caseId) {
+  const { error } = await supabase.from("contract_cases").delete().eq("contract_id", contractId).eq("case_id", caseId);
+  if (error) console.error(error);
+}
+async function linkContractType(contractId, typeId) {
+  const { error } = await supabase.from("contract_types").insert([{ contract_id: contractId, case_type_id: typeId }]);
+  if (error) console.error(error);
+}
+async function unlinkContractType(contractId, typeId) {
+  const { error } = await supabase.from("contract_types").delete().eq("contract_id", contractId).eq("case_type_id", typeId);
+  if (error) console.error(error);
+}
+
+function deriveContractStatus(contract) {
+  if (contract.suspendedSince) return "suspended";
+  const today = todayISO();
+  if (contract.endDate) {
+    if (contract.endDate < today) return "ended";
+    const days = Math.round((new Date(contract.endDate + "T00:00:00") - new Date(today + "T00:00:00")) / 86400000);
+    if (days <= 60) return "expiring";
+  }
+  return "active";
+}
+
+function contractVigenciaLabel(contract, status) {
+  const today = new Date(todayISO() + "T00:00:00");
+  if (status === "suspended") {
+    return `suspenso desde ${fmtDate(contract.suspendedSince)}`;
+  }
+  if (!contract.endDate) {
+    const start = new Date(contract.startDate + "T00:00:00");
+    const months = Math.max(0, Math.round((today - start) / (1000 * 60 * 60 * 24 * 30)));
+    return `vigente há ${months} ${months === 1 ? "mês" : "meses"}`;
+  }
+  const end = new Date(contract.endDate + "T00:00:00");
+  const days = Math.round((end - today) / (1000 * 60 * 60 * 24));
+  if (status === "ended") return `encerrado em ${fmtDate(contract.endDate)}`;
+  if (status === "expiring") return `vence em ${days} dia${days === 1 ? "" : "s"}${contract.autoRenew ? " · renova automaticamente" : ""}`;
+  const months = Math.max(0, Math.round(days / 30));
+  return `${months} ${months === 1 ? "mês restante" : "meses restantes"}`;
+}
+
+function contractVigenciaPct(contract, status) {
+  if (status === "suspended" || !contract.endDate) return null;
+  const start = new Date(contract.startDate + "T00:00:00");
+  const end = new Date(contract.endDate + "T00:00:00");
+  const today = new Date(todayISO() + "T00:00:00");
+  const total = end - start;
+  if (total <= 0) return 100;
+  const elapsed = Math.min(Math.max(today - start, 0), total);
+  return Math.round((elapsed / total) * 100);
 }
 
 function Logo({ dark = true, size = "normal" }) {
@@ -789,7 +879,7 @@ function CaseTasksWeekView({ tasks, onEditTask }) {
   );
 }
 
-function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent }) {
+function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseId, taskPrefill, financeContext, onAddClient, onEditClient, onAddCase, onEditCase, onAddTask, onEditTask, onAddTaskRecurring, onAddFinance, onEditFinance, onAddFinanceRecurring, onAddEvent, onAddNote, onAddDoc, onAddPrecedent, caseTypesCatalog, contractCaseIds, contractTypesByContractId, onAddContract, onEditContract }) {
   const [error, setError] = useState("");
 
   if (modal === "client") {
@@ -859,6 +949,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
     const [honorariosContratuais, setHonorariosContratuais] = useState(editing?.honorariosContratuais || "");
     const [honorariosTipo, setHonorariosTipo] = useState(editing?.honorariosTipo || "fixo");
     const [condenacaoResultado, setCondenacaoResultado] = useState(editing?.condenacaoResultado || "");
+    const [honorariosSucumbencia, setHonorariosSucumbencia] = useState(editing?.honorariosSucumbencia || "");
     const [judgeId, setJudgeId] = useState(editing?.judgeId || "");
     const judges = sortByName(clients.filter((c) => c.contactType === "Juiz"));
     return (
@@ -909,6 +1000,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
               <input type="number" step="0.01" style={inputStyle} value={honorariosContratuais} onChange={(e) => setHonorariosContratuais(e.target.value)} placeholder={honorariosTipo === "percentual" ? "Ex: 20" : "0,00"} />
             </Field>
             <Field label="Condenação / Resultado (R$, opcional)"><input type="number" step="0.01" style={inputStyle} value={condenacaoResultado} onChange={(e) => setCondenacaoResultado(e.target.value)} placeholder="0,00" /></Field>
+            <Field label="Honorários de sucumbência (R$, opcional)"><input type="number" step="0.01" style={inputStyle} value={honorariosSucumbencia} onChange={(e) => setHonorariosSucumbencia(e.target.value)} placeholder="0,00" /></Field>
           </>
         )}
         {caseType === "Consultoria" ? (
@@ -925,8 +1017,84 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Informe o título do caso."); return; }
-          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId, balcaoVirtualLink, valorCausa: valorCausa ? Number(valorCausa) : null, honorariosContratuais: honorariosContratuais ? Number(honorariosContratuais) : null, honorariosTipo, condenacaoResultado: condenacaoResultado ? Number(condenacaoResultado) : null };
+          const values = { title: title.trim(), clientId, number, area, status, caseType, tribunal, comarca, instancia, vara, tribunalLink, judgeId, balcaoVirtualLink, valorCausa: valorCausa ? Number(valorCausa) : null, honorariosContratuais: honorariosContratuais ? Number(honorariosContratuais) : null, honorariosTipo, condenacaoResultado: condenacaoResultado ? Number(condenacaoResultado) : null, honorariosSucumbencia: honorariosSucumbencia ? Number(honorariosSucumbencia) : null };
           if (editing) onEditCase(editing.id, values); else onAddCase(values);
+        }} />
+      </Modal>
+    );
+  }
+
+  if (modal === "contract") {
+    const [title, setTitle] = useState(editing?.title || "");
+    const [clientId, setClientId] = useState(editing?.clientId || clients[0]?.id || "");
+    const [startDate, setStartDate] = useState(editing?.startDate || todayISO());
+    const [noEndDate, setNoEndDate] = useState(editing ? !editing.endDate : false);
+    const [endDate, setEndDate] = useState(editing?.endDate || "");
+    const [monthlyFee, setMonthlyFee] = useState(editing?.monthlyFee ?? "");
+    const [successFeeLabel, setSuccessFeeLabel] = useState(editing?.successFeeLabel || "");
+    const [autoRenew, setAutoRenew] = useState(editing?.autoRenew || false);
+    const [caseIds, setCaseIds] = useState(editing ? (contractCaseIds[editing.id] || []) : []);
+    const [typeIds, setTypeIds] = useState(editing ? (contractTypesByContractId[editing.id] || []).map((t) => t.id) : []);
+    return (
+      <Modal title={editing ? "Editar contrato" : "Novo contrato"} onClose={onClose}>
+        <Field label="Título do contrato"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Assessoria em venda de carteira" /></Field>
+        <Field label="Cliente"><select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">Selecionar…</option>{sortByName(clients).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+        <Field label="Casos vinculados (opcional)">
+          <div style={{ border: "1px solid #E3E0D6", borderRadius: 6, padding: "8px 10px", maxHeight: 140, overflowY: "auto" }}>
+            {cases.length === 0 && <div style={{ fontSize: 12.5, color: MUTED }}>Nenhum caso cadastrado ainda.</div>}
+            {cases.map((c) => (
+              <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
+                <input type="checkbox" checked={caseIds.includes(c.id)} onChange={() => setCaseIds((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])} style={{ accentColor: GOLD }} />
+                {c.title} {c.number ? `· ${c.number}` : ""}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <Field label="Tipos de consultoria (opcional)">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {caseTypesCatalog.map((t) => {
+              const selected = typeIds.includes(t.id);
+              return (
+                <span key={t.id} onClick={() => setTypeIds((prev) => selected ? prev.filter((x) => x !== t.id) : [...prev, t.id])} style={{
+                  fontSize: 12, fontWeight: 600, padding: "5px 11px", borderRadius: 20, cursor: "pointer",
+                  color: "#12283f", background: selected ? t.bg : "#fff", border: `1px solid ${selected ? t.border : "#ddd6c8"}`,
+                }}>{t.name}</span>
+              );
+            })}
+            {caseTypesCatalog.length === 0 && <div style={{ fontSize: 12.5, color: MUTED }}>Nenhum tipo cadastrado ainda — crie um em algum caso de consultoria.</div>}
+          </div>
+        </Field>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}><Field label="Início da vigência"><input type="date" style={inputStyle} value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field></div>
+          <div style={{ flex: 1 }}>
+            <Field label="Fim da vigência">
+              <input type="date" style={{ ...inputStyle, opacity: noEndDate ? 0.5 : 1 }} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={noEndDate} />
+            </Field>
+          </div>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 13, color: INK }}>
+          <input type="checkbox" checked={noEndDate} onChange={(e) => { setNoEndDate(e.target.checked); if (e.target.checked) setEndDate(""); }} style={{ width: 15, height: 15, accentColor: GOLD }} />
+          Prazo indeterminado (sem data de término)
+        </label>
+        <Field label="Honorário mensal (R$)"><input type="number" step="0.01" style={inputStyle} value={monthlyFee} onChange={(e) => setMonthlyFee(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Êxito (opcional)"><input style={inputStyle} value={successFeeLabel} onChange={(e) => setSuccessFeeLabel(e.target.value)} placeholder="Ex: + 2% de êxito sobre a venda" /></Field>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 13, color: INK }}>
+          <input type="checkbox" checked={autoRenew} onChange={(e) => setAutoRenew(e.target.checked)} style={{ width: 15, height: 15, accentColor: GOLD }} />
+          Renovação automática
+        </label>
+        {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <SubmitRow onClose={onClose} onSubmit={() => {
+          if (!title.trim()) { setError("Informe o título do contrato."); return; }
+          if (!clientId) { setError("Selecione o cliente."); return; }
+          const values = {
+            title: title.trim(), clientId, startDate,
+            endDate: noEndDate ? null : (endDate || null),
+            monthlyFee: monthlyFee ? Number(monthlyFee) : 0,
+            successFeeLabel: successFeeLabel.trim() || null,
+            autoRenew,
+          };
+          if (editing) onEditContract(editing.id, values, caseIds, typeIds);
+          else onAddContract(values, caseIds, typeIds);
         }} />
       </Modal>
     );
@@ -1538,6 +1706,7 @@ function MobileBottomNav({ active, onNavigate, onAdd, hasTodayAlertByTab }) {
 function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
   const items = [
     { id: "finance", label: "Financeiro", icon: Wallet },
+    { id: "contracts", label: "Contratos", icon: FileText },
     { id: "clients", label: "Contatos", icon: Users },
     { id: "intake", label: "Cadastros pendentes", icon: CheckSquare },
     ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
@@ -2735,6 +2904,170 @@ function FinanceTab({ finance, clients, cases, onAdd, onEdit, onDelete, clientNa
   );
 }
 
+const CONTRACT_STATUS_META = {
+  active: { bg: "#e4efe6", color: "#1f6b4a", label: "ativo" },
+  expiring: { bg: "#f4ecd8", color: "#8a6d3b", label: "a vencer" },
+  suspended: { bg: "#f1ede2", color: "#23201a", label: "suspenso" },
+  ended: { bg: "#f1ede2", color: "#857d6c", label: "encerrado" },
+};
+
+function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, cases, clients, caseTypesCatalog, onAdd, onEdit, onDelete, onToggleSuspend, onOpenCase }) {
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [typeFilter, setTypeFilter] = useState("todos");
+  const [search, setSearch] = useState("");
+
+  const enriched = contracts.map((c) => ({
+    ...c,
+    status: deriveContractStatus(c),
+    caseIds: contractCaseIds[c.id] || [],
+    types: contractTypesByContractId[c.id] || [],
+  }));
+
+  const counts = {
+    active: enriched.filter((c) => c.status === "active").length,
+    expiring: enriched.filter((c) => c.status === "expiring").length,
+    suspended: enriched.filter((c) => c.status === "suspended").length,
+    ended: enriched.filter((c) => c.status === "ended").length,
+  };
+  const recorrente = enriched.filter((c) => c.status === "active" || c.status === "expiring").reduce((s, c) => s + Number(c.monthlyFee || 0), 0);
+  const vencem60 = enriched.filter((c) => c.status === "expiring");
+  const vencem60ComRenovacao = vencem60.filter((c) => c.autoRenew).length;
+  const exitoAberto = enriched.filter((c) => c.successFeeLabel && c.status !== "ended").length;
+
+  const STATUS_ORDER = { expiring: 0, active: 1, suspended: 2, ended: 3 };
+  const filtered = enriched
+    .filter((c) => c.status === statusFilter)
+    .filter((c) => typeFilter === "todos" || c.types.some((t) => t.id === typeFilter))
+    .filter((c) => !search.trim() || c.title.toLowerCase().includes(search.trim().toLowerCase()))
+    .sort((a, b) => {
+      if (STATUS_ORDER[a.status] !== STATUS_ORDER[b.status]) return STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+      if (a.status === "expiring") return (a.endDate || "").localeCompare(b.endDate || "");
+      return 0;
+    });
+
+  const FILTERS = [
+    { id: "active", label: "Ativos" }, { id: "expiring", label: "A vencer" },
+    { id: "suspended", label: "Suspensos" }, { id: "ended", label: "Encerrados" },
+  ];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontFamily: "Georgia, serif", fontSize: 28, color: SIDEBAR_NAVY, margin: 0 }}>Contratos</h1>
+          <p style={{ fontSize: 13, color: MUTED, margin: "6px 0 0" }}>Consultorias e assessorias em vigência.</p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar contrato"
+            style={{ border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 12px", fontSize: 13 }} />
+          <button onClick={onAdd} style={{ background: SIDEBAR_NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>+ Novo contrato</button>
+        </div>
+      </div>
+
+      <div style={{ background: SIDEBAR_NAVY, borderRadius: 10, padding: "22px 26px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginBottom: 20 }}>
+        <div style={{ borderRight: "1px solid rgba(232,226,213,0.16)", paddingRight: 20 }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 6 }}>Recorrente contratado</div>
+          <div style={{ fontFamily: "Georgia, serif", fontSize: 30, color: "#f5efe4" }}>{fmtBRL(recorrente)}<span style={{ fontSize: 14, color: "rgba(240,234,221,0.6)" }}>/mês</span></div>
+          <div style={{ fontSize: 12, color: "rgba(240,234,221,0.7)", marginTop: 4 }}>{counts.active + counts.expiring} contrato{(counts.active + counts.expiring) === 1 ? "" : "s"} ativo{(counts.active + counts.expiring) === 1 ? "" : "s"} · {counts.suspended} suspenso{counts.suspended === 1 ? "" : "s"}</div>
+        </div>
+        <div style={{ borderRight: "1px solid rgba(232,226,213,0.16)", padding: "0 20px" }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 6 }}>Vencem em 60 dias</div>
+          <div style={{ fontFamily: "Georgia, serif", fontSize: 30, color: "#c9a227" }}>{counts.expiring}</div>
+          <div style={{ fontSize: 12, color: "rgba(240,234,221,0.7)", marginTop: 4 }}>{vencem60ComRenovacao} com renovação automática</div>
+        </div>
+        <div style={{ paddingLeft: 20 }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.1em", color: "rgba(240,234,221,0.6)", textTransform: "uppercase", marginBottom: 6 }}>Êxito em aberto</div>
+          <div style={{ fontFamily: "Georgia, serif", fontSize: 30, color: "#f5efe4" }}>{exitoAberto}</div>
+          <div style={{ fontSize: 12, color: "rgba(240,234,221,0.7)", marginTop: 4 }}>honorários condicionados a resultado</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+        {FILTERS.map((f) => (
+          <span key={f.id} onClick={() => setStatusFilter(f.id)} style={{
+            fontSize: 13, padding: "7px 14px", borderRadius: 20, cursor: "pointer",
+            background: statusFilter === f.id ? SIDEBAR_NAVY : "#fff", color: statusFilter === f.id ? "#EDE6D8" : NAVY,
+            border: statusFilter === f.id ? "none" : "1px solid #E3E0D6", fontWeight: statusFilter === f.id ? 600 : 400,
+          }}>{f.label} · {counts[f.id]}</span>
+        ))}
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ marginLeft: "auto", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 10px", fontSize: 13 }}>
+          <option value="todos">Tipo: todos</option>
+          {caseTypesCatalog.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {filtered.length === 0 && <Empty text="Nenhum contrato encontrado." />}
+        {filtered.map((c) => {
+          const client = clients.find((cl) => cl.id === c.clientId);
+          const linkedCase = c.caseIds.length ? cases.find((cs) => cs.id === c.caseIds[0]) : null;
+          const pct = contractVigenciaPct(c, c.status);
+          const barColor = c.status === "expiring" ? "#c04a40" : "#c9a227";
+          const borderTint = c.status === "active" ? "#c9a227" : c.status === "expiring" ? "#c04a40" : "transparent";
+          const pill = CONTRACT_STATUS_META[c.status];
+          return (
+            <div key={c.id} onClick={() => onEdit(c)} style={{
+              background: "#fff", border: "1px solid #e6e0d2", borderLeft: `3px solid ${borderTint}`,
+              borderRadius: 8, padding: "18px 20px", display: "flex", gap: 20, alignItems: "center",
+              cursor: "pointer", opacity: (c.status === "suspended" || c.status === "ended") ? 0.78 : 1, flexWrap: "wrap",
+            }}>
+              <div style={{ flex: "1.6 1 220px", minWidth: 0 }}>
+                <div style={{ fontSize: 16, color: "#23201a", marginBottom: 4 }}>{c.title}</div>
+                <div style={{ fontSize: 13, color: "#857d6c", marginBottom: 6 }}>
+                  {client?.name || "—"}
+                  {linkedCase
+                    ? <> · <span onClick={(e) => { e.stopPropagation(); onOpenCase(linkedCase.id); }} style={{ color: NAVY, textDecoration: "underline", cursor: "pointer" }}>caso {linkedCase.number || linkedCase.title} ›</span></>
+                    : " · sem caso vinculado"}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {c.types.map((t) => <span key={t.id} style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 20, background: t.bg, border: `1px solid ${t.border}`, color: "#12283f" }}>{t.name}</span>)}
+                </div>
+              </div>
+              <div style={{ flex: "1.1 1 160px", minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: "#23201a", marginBottom: 6 }}>
+                  {fmtDate(c.startDate)} → {c.endDate ? fmtDate(c.endDate) : "prazo indeterminado"}
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: "#ece7da", overflow: "hidden", marginBottom: 6 }}>
+                  {c.status === "suspended" ? (
+                    <div style={{ width: "100%", height: "100%", background: "#b8b0a0" }} />
+                  ) : !c.endDate ? (
+                    <div style={{ width: "100%", height: "100%", background: "repeating-linear-gradient(45deg, #e2d7b8 0 5px, #ece7da 5px 10px)" }} />
+                  ) : (
+                    <div style={{ width: `${pct}%`, height: "100%", background: barColor }} />
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: c.status === "expiring" ? "#c04a40" : "#857d6c", fontWeight: c.status === "expiring" ? 600 : 400 }}>
+                  {contractVigenciaLabel(c, c.status)}
+                </div>
+              </div>
+              <div style={{ width: 150 }}>
+                {c.status === "suspended" ? (
+                  <>
+                    <div style={{ fontFamily: "Georgia, serif", fontSize: 21, color: "#857d6c" }}>R$ 0<span style={{ fontSize: 13 }}>/mês</span></div>
+                    <div style={{ fontSize: 12, color: "#857d6c" }}>cobrança pausada</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontFamily: "Georgia, serif", fontSize: 21, color: "#23201a" }}>{fmtBRL(c.monthlyFee)}<span style={{ fontSize: 13, color: "#857d6c" }}>/mês</span></div>
+                    <div style={{ fontSize: 12, color: c.successFeeLabel ? "#8a6d3b" : "#857d6c" }}>{c.successFeeLabel || "sem êxito"}</div>
+                  </>
+                )}
+              </div>
+              <div style={{ width: 100 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: pill.bg, color: pill.color }}>{pill.label}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }} onClick={(e) => e.stopPropagation()}>
+                <span onClick={() => onToggleSuspend(c)} style={{ fontSize: 11.5, color: NAVY, cursor: "pointer" }}>{c.status === "suspended" ? "Reativar" : "Suspender"}</span>
+                <span onClick={() => onDelete(c.id)} style={{ fontSize: 11.5, color: "#C0997B", cursor: "pointer" }}>Excluir</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function IntakeReviewTab({ onUseSubmission }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3138,6 +3471,10 @@ export default function RSACApp() {
   const [portalData, setPortalData] = useState(null);
   const [caseTypesCatalog, setCaseTypesCatalog] = useState([]);
   const [caseTypesByCaseId, setCaseTypesByCaseId] = useState({});
+  const [contracts, setContracts] = useState([]);
+  const [contractCaseIds, setContractCaseIds] = useState({});
+  const [contractTypesByContractId, setContractTypesByContractId] = useState({});
+  const [editingContract, setEditingContract] = useState(null);
   const [currentUserName, setCurrentUserName] = useState("Você");
   const [taskPrefill, setTaskPrefill] = useState(null);
 
@@ -3160,8 +3497,11 @@ export default function RSACApp() {
       setClients(d.clients); setCases(d.cases); setTasks(d.tasks); setAppts(d.appts); setFinance(d.finance);
       setEvents(d.events); setNotes(d.notes); setDocuments(d.documents); setPrecedents(d.precedents);
       setMonthlyGoal(d.monthlyGoal || 0);
+      setContracts(d.contracts);
       const { catalog, byCaseId } = await fetchCaseTypesData();
       setCaseTypesCatalog(catalog); setCaseTypesByCaseId(byCaseId);
+      const { caseIdsByContract, typesByContract } = await fetchContractRelations();
+      setContractCaseIds(caseIdsByContract); setContractTypesByContractId(typesByContract);
       const { data: profile } = await supabase.from("profiles").select("role, full_name").eq("id", session.user.id).single();
       const r = profile?.role || "staff";
       setRole(r);
@@ -3200,6 +3540,42 @@ export default function RSACApp() {
   const handleRemoveCaseType = useCallback(async (caseId, typeId) => {
     await unlinkCaseType(caseId, typeId);
     setCaseTypesByCaseId((prev) => ({ ...prev, [caseId]: (prev[caseId] || []).filter((t) => t.id !== typeId) }));
+  }, []);
+
+  const handleAddContract = useCallback(async (values, caseIds, typeIds) => {
+    const saved = await insertRow("contracts", values);
+    if (!saved) return;
+    setContracts((prev) => [...prev, saved]);
+    await Promise.all((caseIds || []).map((cid) => linkContractCase(saved.id, cid)));
+    await Promise.all((typeIds || []).map((tid) => linkContractType(saved.id, tid)));
+    setContractCaseIds((prev) => ({ ...prev, [saved.id]: caseIds || [] }));
+    setContractTypesByContractId((prev) => ({ ...prev, [saved.id]: caseTypesCatalog.filter((t) => (typeIds || []).includes(t.id)) }));
+  }, [caseTypesCatalog]);
+
+  const handleEditContract = useCallback(async (id, values, caseIds, typeIds) => {
+    const saved = await editRow("contracts", id, values);
+    if (!saved) return;
+    setContracts((prev) => prev.map((c) => (c.id === id ? saved : c)));
+    const prevCaseIds = contractCaseIds[id] || [];
+    const prevTypeIds = (contractTypesByContractId[id] || []).map((t) => t.id);
+    await Promise.all(prevCaseIds.filter((cid) => !(caseIds || []).includes(cid)).map((cid) => unlinkContractCase(id, cid)));
+    await Promise.all((caseIds || []).filter((cid) => !prevCaseIds.includes(cid)).map((cid) => linkContractCase(id, cid)));
+    await Promise.all(prevTypeIds.filter((tid) => !(typeIds || []).includes(tid)).map((tid) => unlinkContractType(id, tid)));
+    await Promise.all((typeIds || []).filter((tid) => !prevTypeIds.includes(tid)).map((tid) => linkContractType(id, tid)));
+    setContractCaseIds((prev) => ({ ...prev, [id]: caseIds || [] }));
+    setContractTypesByContractId((prev) => ({ ...prev, [id]: caseTypesCatalog.filter((t) => (typeIds || []).includes(t.id)) }));
+  }, [contractCaseIds, contractTypesByContractId, caseTypesCatalog]);
+
+  const handleToggleSuspendContract = useCallback(async (contract) => {
+    const nextSuspended = contract.suspendedSince ? null : todayISO();
+    await updateRow("contracts", contract.id, { suspended_since: nextSuspended });
+    setContracts((prev) => prev.map((c) => (c.id === contract.id ? { ...c, suspendedSince: nextSuspended } : c)));
+  }, []);
+
+  const handleDeleteContract = useCallback(async (id) => {
+    await removeRow("contracts", id);
+    setContractCaseIds((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    setContractTypesByContractId((prev) => { const n = { ...prev }; delete n[id]; return n; });
   }, []);
 
   const handleAddNote = useCallback(async (caseId, values) => {
@@ -3362,6 +3738,7 @@ export default function RSACApp() {
     { id: "tasks", label: "Todas as tarefas", icon: CheckSquare },
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
     { id: "finance", label: "Financeiro", icon: Wallet },
+    { id: "contracts", label: "Contratos", icon: FileText },
   ];
   const SECONDARY_NAV = [
     { id: "clients", label: "Contatos", icon: Users },
@@ -3497,6 +3874,17 @@ export default function RSACApp() {
                   onOpenCase={(id) => { setActiveCaseId(id); }} />
               </div>
             )}
+            {mobileTab === "contracts" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                <ContractsPage contracts={contracts} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
+                  cases={cases} clients={clients} caseTypesCatalog={caseTypesCatalog}
+                  onAdd={() => { setEditingContract(null); setModal("contract"); }}
+                  onEdit={(c) => { setEditingContract(c); setModal("contract"); }}
+                  onDelete={(id) => handleDeleteContract(id)}
+                  onToggleSuspend={handleToggleSuspendContract}
+                  onOpenCase={(id) => { setActiveCaseId(id); }} />
+              </div>
+            )}
             {mobileTab === "clients" && (
               <div style={{ padding: "16px 18px 100px" }}>
                 {viewClient ? (
@@ -3544,11 +3932,14 @@ export default function RSACApp() {
         )}
 
         {modal && (
-          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); }} clients={clients} cases={cases} prefill={prefillClient}
-            editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
+          <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); setEditingContract(null); }} clients={clients} cases={cases} prefill={prefillClient}
+            editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : modal === "contract" ? editingContract : null}
             taskCaseId={folderCaseId}
             taskPrefill={taskPrefill}
             financeContext={financeContext}
+            caseTypesCatalog={caseTypesCatalog} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
+            onAddContract={(v, caseIds, typeIds) => { handleAddContract(v, caseIds, typeIds); setModal(null); }}
+            onEditContract={(id, v, caseIds, typeIds) => { handleEditContract(id, v, caseIds, typeIds); setModal(null); setEditingContract(null); }}
             onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
             onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
             onAddCase={(v) => { addRow("cases", v); setModal(null); }}
@@ -3945,6 +4336,16 @@ export default function RSACApp() {
             clientName={clientName} onOpenCase={(id) => openCase(id)} />
         )}
 
+        {tab === "contracts" && (
+          <ContractsPage contracts={contracts} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
+            cases={cases} clients={clients} caseTypesCatalog={caseTypesCatalog}
+            onAdd={() => { setEditingContract(null); setModal("contract"); }}
+            onEdit={(c) => { setEditingContract(c); setModal("contract"); }}
+            onDelete={(id) => handleDeleteContract(id)}
+            onToggleSuspend={handleToggleSuspendContract}
+            onOpenCase={(id) => openCase(id)} />
+        )}
+
         {tab === "intake" && (
           <IntakeReviewTab onUseSubmission={useSubmission} />
         )}
@@ -3957,11 +4358,14 @@ export default function RSACApp() {
       </div>
 
       {modal && (
-        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); }} clients={clients} cases={cases} prefill={prefillClient}
-          editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : null}
+        <FormLayer modal={modal} onClose={() => { setModal(null); setEditingClient(null); setPrefillClient(null); setEditingCase(null); setEditingTask(null); setEditingFinance(null); setFolderCaseId(null); setFinanceContext(null); setTaskPrefill(null); setEditingContract(null); }} clients={clients} cases={cases} prefill={prefillClient}
+          editing={modal === "client" ? editingClient : modal === "case" ? editingCase : modal === "task" ? editingTask : modal === "finance" ? editingFinance : modal === "contract" ? editingContract : null}
           taskCaseId={folderCaseId}
           taskPrefill={taskPrefill}
           financeContext={financeContext}
+          caseTypesCatalog={caseTypesCatalog} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
+          onAddContract={(v, caseIds, typeIds) => { handleAddContract(v, caseIds, typeIds); setModal(null); }}
+          onEditContract={(id, v, caseIds, typeIds) => { handleEditContract(id, v, caseIds, typeIds); setModal(null); setEditingContract(null); }}
           onAddClient={(v) => { addRow("clients", v); setModal(null); setPrefillClient(null); }}
           onEditClient={(id, v) => { editClientRow(id, v); setModal(null); setEditingClient(null); }}
           onAddCase={(v) => { addRow("cases", v); setModal(null); }}
