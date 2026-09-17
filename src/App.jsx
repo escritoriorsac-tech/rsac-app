@@ -1302,9 +1302,11 @@ function LoginScreen({ onClientPortalAccess }) {
   const [portalCode, setPortalCode] = useState(""); const [portalError, setPortalError] = useState(""); const [portalBusy, setPortalBusy] = useState(false);
 
   const [publicNews, setPublicNews] = useState([]);
+  const [openNews, setOpenNews] = useState(null);
 
   useEffect(() => {
-    supabase.from("newsletters").select("subject, html_body, scheduled_for")
+    supabase.from("newsletters")
+      .select("subject, html_body, scheduled_for, body_image_url, highlight_title, highlight_text, cta_text, cta_link, pdf_url, pdf_filename")
       .eq("sent", true).order("scheduled_for", { ascending: false }).limit(3)
       .then(({ data }) => setPublicNews(data || []));
   }, []);
@@ -1410,7 +1412,8 @@ function LoginScreen({ onClientPortalAccess }) {
           {publicNews.map((n, i) => {
             const snippet = (n.html_body || "").split("\n").find((l) => l.trim()) || "";
             return (
-              <div key={i} style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: i === publicNews.length - 1 ? "none" : "1px solid #F1EFE8" }}>
+              <div key={i} onClick={() => setOpenNews(n)}
+                style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: i === publicNews.length - 1 ? "none" : "1px solid #F1EFE8", cursor: "pointer" }}>
                 <div style={{ width: 4, background: GOLD, borderRadius: 2, flexShrink: 0 }} />
                 <div>
                   <div style={{ fontSize: 13, color: NAVY, fontWeight: 600 }}>{n.subject}</div>
@@ -1421,6 +1424,37 @@ function LoginScreen({ onClientPortalAccess }) {
             );
           })}
         </div>
+      )}
+
+      {openNews && (
+        <Modal title={openNews.subject} onClose={() => setOpenNews(null)}>
+          <div style={{ fontSize: 11, color: MUTED, marginBottom: 14 }}>{fmtDate(openNews.scheduled_for)}</div>
+          {openNews.body_image_url && (
+            <img src={openNews.body_image_url} alt="" style={{ width: "100%", borderRadius: 8, marginBottom: 14, display: "block" }} />
+          )}
+          {(openNews.html_body || "").split("\n").filter((p) => p.trim()).map((p, i) => (
+            <p key={i} style={{ fontSize: 13.5, color: INK, lineHeight: 1.6, margin: "0 0 12px" }}>{p}</p>
+          ))}
+          {(openNews.highlight_title || openNews.highlight_text) && (
+            <div style={{ background: "#F1EFE8", borderLeft: `3px solid ${GOLD}`, borderRadius: 6, padding: "12px 14px", margin: "0 0 14px" }}>
+              {openNews.highlight_title && <div style={{ fontSize: 13, fontWeight: 600, color: NAVY, marginBottom: 4 }}>{openNews.highlight_title}</div>}
+              {openNews.highlight_text && <div style={{ fontSize: 13, color: INK, lineHeight: 1.5 }}>{openNews.highlight_text}</div>}
+            </div>
+          )}
+          {openNews.pdf_url && (
+            <a href={openNews.pdf_url} target="_blank" rel="noreferrer" style={{ display: "inline-block", fontSize: 12.5, color: NAVY, marginBottom: 14 }}>
+              📎 {openNews.pdf_filename || "Baixar anexo"}
+            </a>
+          )}
+          {openNews.cta_text && openNews.cta_link && (
+            <a href={openNews.cta_link} target="_blank" rel="noreferrer" style={{
+              display: "block", textAlign: "center", background: NAVY, color: "#EDE6D8", borderRadius: 6,
+              padding: "10px 16px", fontSize: 13.5, textDecoration: "none",
+            }}>
+              {openNews.cta_text}
+            </a>
+          )}
+        </Modal>
       )}
     </div>
   );
