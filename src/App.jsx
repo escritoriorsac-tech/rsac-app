@@ -3,7 +3,8 @@ import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
-  Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check, FileText
+  Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check, FileText,
+  MapPin, Linkedin, MessageCircle
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -1375,6 +1376,29 @@ function LoginScreen({ onClientPortalAccess }) {
           <button onClick={submitPortal} disabled={portalBusy} style={{ width: "100%", background: GOLD, color: "#0F2A43", border: "none", borderRadius: 6, padding: "10px 16px", fontSize: 14, cursor: "pointer", marginTop: 4, fontWeight: 600 }}>
             {portalBusy ? "Verificando…" : "Acessar meus casos"}
           </button>
+          <div style={{ textAlign: "center", marginTop: 12, fontSize: 11.5, color: "#8697A6" }}>
+            Não tem um código? Veja abaixo como entrar em contato.
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid #24405C", borderRadius: 10, padding: "20px 22px", maxWidth: 620, margin: "0 auto 20px", textAlign: "center" }}>
+        <div style={{ fontSize: 11, letterSpacing: 1, color: "#9FB0BE", textTransform: "uppercase", marginBottom: 16 }}>
+          Ainda não é cliente?
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 22, flexWrap: "wrap" }}>
+          <a href="https://wa.me/5511933596958" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 6, color: "#EDE6D8", fontSize: 12.5, textDecoration: "none" }}>
+            <MessageCircle size={14} color={GOLD} /> +55 11 93359-6958
+          </a>
+          <a href="mailto:escritorio.rsac@gmail.com" style={{ display: "flex", alignItems: "center", gap: 6, color: "#EDE6D8", fontSize: 12.5, textDecoration: "none" }}>
+            <Mail size={14} color={GOLD} /> escritorio.rsac@gmail.com
+          </a>
+          <a href="https://www.linkedin.com/in/rodrigolcssantos" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 6, color: "#EDE6D8", fontSize: 12.5, textDecoration: "none" }}>
+            <Linkedin size={14} color={GOLD} /> LinkedIn
+          </a>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#EDE6D8", fontSize: 12.5 }}>
+            <MapPin size={14} color={GOLD} /> Av. Paulista, 1106, 16º andar — São Paulo/SP
+          </span>
         </div>
       </div>
 
