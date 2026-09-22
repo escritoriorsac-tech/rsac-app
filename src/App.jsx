@@ -4,7 +4,7 @@ import Docxtemplater from "docxtemplater";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
   Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check, FileText,
-  MapPin, Linkedin, MessageCircle
+  MapPin, Linkedin, MessageCircle, Clock, AlertTriangle
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -1773,6 +1773,7 @@ function MobileBottomNav({ active, onNavigate, onAdd, hasTodayAlertByTab }) {
 
 function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
   const items = [
+    { id: "deadlines", label: "Controle de Prazos", icon: Clock },
     { id: "finance", label: "Financeiro", icon: Wallet },
     { id: "contracts", label: "Contratos", icon: FileText },
     { id: "clients", label: "Contatos", icon: Users },
@@ -2832,6 +2833,101 @@ function CaseFolder({
         <button onClick={onAddPayment} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginTop: 10 }}>+ Adicionar pagamento do cliente</button>
       </SectionCard>
     </>
+  );
+}
+
+const DEADLINE_BUCKETS = [
+  { key: "overdue", label: "Atrasados", color: "#993D1D", bg: "#FBE3DC", match: (d) => d < 0 },
+  { key: "today", label: "Hoje", color: "#8a6d1f", bg: "#FBEFD2", match: (d) => d === 0 },
+  { key: "tomorrow", label: "Amanhã", color: NAVY, bg: "#E7ECF1", match: (d) => d === 1 },
+  { key: "week", label: "Esta semana", color: NAVY, bg: "#EAEFF5", match: (d) => d >= 2 && d <= 6 },
+  { key: "month", label: "Este mês", color: MUTED, bg: "#F1EFE8", match: (d) => d >= 7 && d <= 31 },
+  { key: "later", label: "Mais adiante", color: MUTED, bg: "#F1EFE8", match: (d) => d > 31 },
+];
+
+function DeadlinesTab({ tasks, cases, clients, onToggle, onDeleteTask, onEditTask, onOpenCase, onAdd }) {
+  const [caseTypeFilter, setCaseTypeFilter] = useState("todos");
+
+  const caseById = {}; cases.forEach((c) => { caseById[c.id] = c; });
+  const clientById = {}; clients.forEach((c) => { clientById[c.id] = c; });
+
+  let items = tasks
+    .filter((t) => !t.done && t.dueDate)
+    .map((t) => {
+      const caseItem = t.caseId ? caseById[t.caseId] : null;
+      const client = caseItem ? clientById[caseItem.clientId] : null;
+      return { ...t, caseItem, clientName: client ? client.name : null, d: daysUntil(t.dueDate) };
+    });
+
+  if (caseTypeFilter !== "todos") items = items.filter((it) => it.caseItem?.caseType === caseTypeFilter);
+  items.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+  const overdueCount = items.filter((it) => it.d < 0).length;
+  const todayCount = items.filter((it) => it.d === 0).length;
+  const weekCount = items.filter((it) => it.d >= 0 && it.d <= 6).length;
+
+  return (
+    <ListPage title="Controle de Prazos" subtitle="Todos os prazos em aberto do escritório, organizados por urgência." onAdd={onAdd}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+        <StatCard icon={AlertTriangle} label="Atrasados" value={overdueCount} />
+        <StatCard icon={Clock} label="Hoje" value={todayCount} />
+        <StatCard icon={CalendarIcon} label="Próximos 7 dias" value={weekCount} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+        {["todos", "Judicial", "Consultoria"].map((f) => (
+          <button key={f} onClick={() => setCaseTypeFilter(f)} style={{
+            background: caseTypeFilter === f ? NAVY : "#fff", color: caseTypeFilter === f ? "#EDE6D8" : NAVY,
+            border: "1px solid #E3E0D6", borderRadius: 20, padding: "5px 14px", fontSize: 12, cursor: "pointer",
+          }}>
+            {f === "todos" ? "Todos os casos" : f}
+          </button>
+        ))}
+      </div>
+
+      {items.length === 0 && <Empty text="Nenhum prazo em aberto." />}
+
+      {DEADLINE_BUCKETS.map((bucket) => {
+        const bucketItems = items.filter((it) => bucket.match(it.d));
+        if (bucketItems.length === 0) return null;
+        return (
+          <div key={bucket.key} style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", color: bucket.color }}>{bucket.label}</span>
+              <span style={{ fontSize: 11, background: bucket.bg, color: bucket.color, borderRadius: 10, padding: "1px 8px" }}>{bucketItems.length}</span>
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #EAE7DC", borderRadius: 8, padding: "4px 12px" }}>
+              {bucketItems.map((it) => (
+                <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #F1EFE8" }}>
+                  <div onClick={() => onToggle(it.id)} style={{
+                    width: 15, height: 15, borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                    border: `1.5px solid ${ICON_INACTIVE}`, background: "#fff",
+                  }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: TEXT_PRIMARY }}>{it.title}</div>
+                    {it.caseItem && (
+                      <div onClick={() => onOpenCase(it.caseItem.id)} style={{ fontSize: 11, color: "#9A917E", marginTop: 2, cursor: "pointer" }}>
+                        {it.caseItem.title}{it.clientName ? " · " + it.clientName : ""} →
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: bucket.color, flexShrink: 0, whiteSpace: "nowrap" }}>
+                    {it.d < 0 ? `${Math.abs(it.d)}d atrasado` : it.d === 0 ? "vence hoje" : `em ${it.d}d`}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "#9A917E", flexShrink: 0, whiteSpace: "nowrap" }}>{fmtDate(it.dueDate)}</div>
+                  <button onClick={() => onEditTask(it)} style={{ background: "none", border: "none", cursor: "pointer", color: ICON_INACTIVE, padding: 4 }}>
+                    <Pencil size={13} />
+                  </button>
+                  <button onClick={() => onDeleteTask(it.id)} style={{ background: "none", border: "none", cursor: "pointer", color: ICON_INACTIVE, padding: 4 }}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </ListPage>
   );
 }
 
@@ -4065,6 +4161,7 @@ export default function RSACApp() {
 
   const NAV = [
     { id: "dashboard", label: "Painel", icon: LayoutDashboard },
+    { id: "deadlines", label: "Controle de Prazos", icon: Clock },
     { id: "tasks", label: "Todas as tarefas", icon: CheckSquare },
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
     { id: "finance", label: "Financeiro", icon: Wallet },
@@ -4251,7 +4348,16 @@ export default function RSACApp() {
                 <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
               </div>
             )}
-            <MobileBottomNav active={["clients", "finance", "newsletter", "intake"].includes(mobileTab) ? "more" : mobileTab}
+            {mobileTab === "deadlines" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                <DeadlinesTab tasks={tasks} cases={cases} clients={clients}
+                  onToggle={toggleTask} onDeleteTask={(id) => removeRow("tasks", id)}
+                  onEditTask={(t) => { setEditingTask(t); setFolderCaseId(t.caseId); setModal("task"); }}
+                  onOpenCase={openCase}
+                  onAdd={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }} />
+              </div>
+            )}
+            <MobileBottomNav active={["clients", "finance", "newsletter", "intake", "deadlines"].includes(mobileTab) ? "more" : mobileTab}
               onNavigate={(id) => { if (id === "more") setMobileMoreOpen(true); else goToTab(id); }}
               onAdd={floatingAddAction || (() => {})}
               hasTodayAlertByTab={hasTodayAlertByTab} />
@@ -4569,6 +4675,14 @@ export default function RSACApp() {
                 });
               })()}
           </ListPage>
+        )}
+
+        {tab === "deadlines" && (
+          <DeadlinesTab tasks={tasks} cases={cases} clients={clients}
+            onToggle={toggleTask} onDeleteTask={(id) => removeRow("tasks", id)}
+            onEditTask={(t) => { setEditingTask(t); setFolderCaseId(t.caseId); setModal("task"); }}
+            onOpenCase={openCase}
+            onAdd={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }} />
         )}
 
         {tab === "tasks" && (
