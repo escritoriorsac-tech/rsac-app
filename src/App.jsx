@@ -1056,7 +1056,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
             {cases.map((c) => (
               <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13 }}>
                 <input type="checkbox" checked={caseIds.includes(c.id)} onChange={() => setCaseIds((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])} style={{ accentColor: GOLD }} />
-                {c.title} {c.number ? `· ${c.number}` : ""}
+                {c.title} {c.number ? `· ${c.number}` : ""}{c.tribunal ? ` · ${c.tribunal}` : ""}
               </label>
             ))}
           </div>
@@ -1545,7 +1545,7 @@ function ClientFolder({ client, cases, finance, precedents, onBack, onEdit, onDe
           <SectionCard title={`Casos como juiz (${judgeCases.length})`}>
             {judgeCases.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum caso vinculado a este juiz.</p>}
             {judgeCases.map((c) => (
-              <RowCard key={c.id} onClick={() => onOpenCase(c)} title={c.title} subtitle={`${c.number || "sem número"}${c.vara ? " · " + c.vara : ""}`} right={<Badge text={c.status} />} />
+              <RowCard key={c.id} onClick={() => onOpenCase(c)} title={c.title} subtitle={`${c.number || "sem número"}${c.tribunal ? " · " + c.tribunal : ""}${c.vara ? " · " + c.vara : ""}`} right={<Badge text={c.status} />} />
             ))}
           </SectionCard>
           <SectionCard title="Sentenças e jurisprudências aplicáveis">
@@ -1564,7 +1564,7 @@ function ClientFolder({ client, cases, finance, precedents, onBack, onEdit, onDe
           <SectionCard title={`Casos vinculados (${linkedCases.length})`}>
             {linkedCases.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum caso vinculado a este cliente.</p>}
             {linkedCases.map((c) => (
-              <RowCard key={c.id} onClick={() => onOpenCase(c)} title={c.title} subtitle={`${c.number || "sem número"}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
+              <RowCard key={c.id} onClick={() => onOpenCase(c)} title={c.title} subtitle={`${c.number || "sem número"}${c.tribunal ? " · " + c.tribunal : ""}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
             ))}
           </SectionCard>
           <SectionCard title={`Financeiro (${linkedFinance.length})`}>
@@ -2377,7 +2377,7 @@ function CaseWorkspace({
           </div>
           <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 600, fontSize: 32, lineHeight: 1.15, color: SIDEBAR_NAVY, margin: 0 }}>{item.title}</h1>
           <div style={{ fontSize: 13, color: MUTED, marginTop: 8 }}>
-            {[item.number, item.vara].filter(Boolean).join(" · ") || "sem dados processuais"}
+            {[item.number, item.tribunal, item.vara].filter(Boolean).join(" · ") || "sem dados processuais"}
           </div>
           {item.caseType === "Consultoria" && (
             <div style={{ marginTop: 12 }}>
@@ -3480,7 +3480,7 @@ function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, 
                 <div style={{ fontSize: 13, color: "#857d6c", marginBottom: 6 }}>
                   {client?.name || "—"}
                   {linkedCase
-                    ? <> · <span onClick={(e) => { e.stopPropagation(); onOpenCase(linkedCase.id); }} style={{ color: NAVY, textDecoration: "underline", cursor: "pointer" }}>caso {linkedCase.number || linkedCase.title} ›</span></>
+                    ? <> · <span onClick={(e) => { e.stopPropagation(); onOpenCase(linkedCase.id); }} style={{ color: NAVY, textDecoration: "underline", cursor: "pointer" }}>caso {linkedCase.number || linkedCase.title}{linkedCase.tribunal ? ` (${linkedCase.tribunal})` : ""} ›</span></>
                     : " · sem caso vinculado"}
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -3886,7 +3886,7 @@ function ClientPortalView({ data, onExit }) {
         <SectionCard title={`Seus casos (${cases.length})`}>
           {cases.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhum caso vinculado no momento.</p>}
           {cases.map((c) => (
-            <RowCard key={c.id} onClick={() => setViewCaseId(c.id)} title={c.title} subtitle={`${c.number || "sem número"}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
+            <RowCard key={c.id} onClick={() => setViewCaseId(c.id)} title={c.title} subtitle={`${c.number || "sem número"}${c.tribunal ? " · " + c.tribunal : ""}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
           ))}
         </SectionCard>
       )}
@@ -4576,7 +4576,7 @@ export default function RSACApp() {
                   <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F1EFE8" }}>
                     <div>
                       <div style={{ fontSize: 14, color: INK, fontWeight: 500 }}>{c.title}</div>
-                      <div style={{ fontSize: 12, color: MUTED }}>{clientName(c.clientId)} {c.number ? `· ${c.number}` : ""}</div>
+                      <div style={{ fontSize: 12, color: MUTED }}>{clientName(c.clientId)} {c.number ? `· ${c.number}` : ""}{c.tribunal ? ` · ${c.tribunal}` : ""}</div>
                     </div>
                     <Badge text={c.status} />
                   </div>
@@ -4705,7 +4705,7 @@ export default function RSACApp() {
                               onClick={() => openCase(c.id)}
                               onEdit={() => { setEditingCase(c); setModal("case"); }}
                               onDelete={() => removeRow("cases", c.id)}
-                              title={c.title} subtitle={`${c.number || "sem número"}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
+                              title={c.title} subtitle={`${c.number || "sem número"}${c.tribunal ? " · " + c.tribunal : ""}${c.area ? " · " + c.area : ""}`} right={<Badge text={c.status} />} />
                           ))}
                         </div>
                       )}
@@ -4737,7 +4737,7 @@ export default function RSACApp() {
                 return d.toISOString().slice(0, 10);
               });
               const tasksByDay = {};
-              tasks.forEach((t) => { if (t.dueDate) (tasksByDay[t.dueDate] = tasksByDay[t.dueDate] || []).push(t); });
+              tasks.forEach((t) => { if (t.dueDate && !t.done) (tasksByDay[t.dueDate] = tasksByDay[t.dueDate] || []).push(t); });
 
               return (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 18 }}>
@@ -4765,7 +4765,8 @@ export default function RSACApp() {
               <button onClick={() => setTaskDayFilter(null)} style={{ background: "none", border: "none", color: NAVY, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 12 }}>← Ver todas as tarefas</button>
             )}
             {(() => {
-              const visibleTasks = taskDayFilter ? tasks.filter((t) => t.dueDate === taskDayFilter) : tasks;
+              const openTasksOnly = tasks.filter((t) => !t.done);
+              const visibleTasks = taskDayFilter ? openTasksOnly.filter((t) => t.dueDate === taskDayFilter) : openTasksOnly;
               const byCase = {};
               const noCase = [];
               visibleTasks.forEach((t) => {
