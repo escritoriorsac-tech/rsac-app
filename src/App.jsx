@@ -157,7 +157,7 @@ const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number
 const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group, settledAt: r.settled_at });
-const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes });
+const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes, relatedProcess: r.related_process });
 const toNote = (r) => ({
   id: r.id, caseId: r.case_id, date: r.note_date, content: r.content,
   type: r.type || "reuniao", authorId: r.author_id, authorName: r.author_name,
@@ -217,7 +217,7 @@ function toPayload(key, row) {
   if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null, time: row.time || null, location: row.location || null, google_synced: row.googleSynced || false };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
-  if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null };
+  if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null, related_process: row.relatedProcess || null };
   if (key === "notes") return {
     case_id: row.caseId, note_date: row.date || todayISO(), content: row.content,
     type: row.type || "reuniao", author_id: row.authorId || null, author_name: row.authorName || null,
@@ -1244,13 +1244,17 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
   if (modal === "event") {
     const [date, setDate] = useState(todayISO()); const [description, setDescription] = useState("");
     const [notes, setNotes] = useState("");
+    const [relatedProcess, setRelatedProcess] = useState("");
     return (
       <Modal title="Novo evento na timeline" onClose={onClose}>
         <Field label="Data"><input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Descrição"><input style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Juntada de petição" /></Field>
+        <Field label="Processo relacionado (opcional — deixe em branco para o processo principal)">
+          <input style={inputStyle} value={relatedProcess} onChange={(e) => setRelatedProcess(e.target.value)} placeholder="Ex: Agravo de Instrumento nº 0049325-31.2026.8.19.0000" />
+        </Field>
         <Field label="Notas / pontos importantes (opcional)"><textarea style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Detalhes que valem ser lembrados…" /></Field>
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
-        <SubmitRow onClose={onClose} onSubmit={() => { if (!description.trim()) { setError("Descreva o evento."); return; } onAddEvent({ caseId: taskCaseId, date, description: description.trim(), notes }); }} />
+        <SubmitRow onClose={onClose} onSubmit={() => { if (!description.trim()) { setError("Descreva o evento."); return; } onAddEvent({ caseId: taskCaseId, date, description: description.trim(), notes, relatedProcess: relatedProcess.trim() || null }); }} />
       </Modal>
     );
   }
@@ -1633,6 +1637,41 @@ function Timeline({ events, onDelete }) {
         );
       })}
     </div>
+  );
+}
+
+function ProcessTimeline({ events, onDelete, mainLabel }) {
+  const [selected, setSelected] = useState("__main__");
+  const groups = {};
+  events.forEach((e) => {
+    const key = e.relatedProcess ? e.relatedProcess : "__main__";
+    (groups[key] = groups[key] || []).push(e);
+  });
+  const relatedKeys = Object.keys(groups).filter((k) => k !== "__main__");
+  const hasMultiple = relatedKeys.length > 0;
+  const activeKey = groups[selected] ? selected : "__main__";
+  return (
+    <>
+      {hasMultiple && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          <button onClick={() => setSelected("__main__")} style={{
+            background: activeKey === "__main__" ? NAVY : "#fff", color: activeKey === "__main__" ? "#EDE6D8" : NAVY,
+            border: "1px solid #E3E0D6", borderRadius: 20, padding: "5px 14px", fontSize: 12, cursor: "pointer",
+          }}>
+            {mainLabel || "Processo principal"}
+          </button>
+          {relatedKeys.map((k) => (
+            <button key={k} onClick={() => setSelected(k)} style={{
+              background: activeKey === k ? NAVY : "#fff", color: activeKey === k ? "#EDE6D8" : NAVY,
+              border: "1px solid #E3E0D6", borderRadius: 20, padding: "5px 14px", fontSize: 12, cursor: "pointer",
+            }}>
+              {k}
+            </button>
+          ))}
+        </div>
+      )}
+      <Timeline events={groups[activeKey] || []} onDelete={onDelete} />
+    </>
   );
 }
 
@@ -2141,7 +2180,7 @@ function MobileCaseScreen({
               </>}
             </SectionCard>
             <SectionCard title="Andamento processual">
-              <Timeline events={caseEvents} onDelete={onDeleteEvent} />
+              <ProcessTimeline events={caseEvents} onDelete={onDeleteEvent} mainLabel={item.number ? `Processo principal (${item.number})` : "Processo principal"} />
             </SectionCard>
           </>
         )}
@@ -2580,7 +2619,7 @@ function CaseWorkspace({
             )}
           </SectionCard>
           <SectionCard title="Andamento processual">
-            <Timeline events={caseEvents} onDelete={onDeleteEvent} />
+            <ProcessTimeline events={caseEvents} onDelete={onDeleteEvent} mainLabel={item.number ? `Processo principal (${item.number})` : "Processo principal"} />
           </SectionCard>
         </>
       )}
