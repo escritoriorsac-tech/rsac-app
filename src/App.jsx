@@ -4,7 +4,7 @@ import Docxtemplater from "docxtemplater";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
   Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check, FileText,
-  MapPin, Linkedin, MessageCircle, Clock, AlertTriangle
+  MapPin, Linkedin, MessageCircle, Clock, AlertTriangle, Calculator
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -174,16 +174,23 @@ const toContract = (r) => ({
   createdAt: r.created_at,
 });
 
+const toQuote = (r) => ({
+  id: r.id, number: r.number, clientId: r.client_id, prospectName: r.prospect_name, prospectContact: r.prospect_contact,
+  title: r.title, status: r.status || "rascunho", items: Array.isArray(r.items) ? r.items : [],
+  discountPct: Number(r.discount_pct || 0), paymentTerms: r.payment_terms, validityDays: r.validity_days ?? 15,
+  notes: r.notes, createdAt: r.created_at,
+});
+
 const TABLE_BY_KEY = {
   clients: "clients", cases: "cases", tasks: "tasks",
   appts: "appointments", finance: "finance_entries",
   events: "case_events", notes: "case_notes", documents: "case_documents",
-  precedents: "judge_precedents", contracts: "contracts",
+  precedents: "judge_precedents", contracts: "contracts", quotes: "quotes",
 };
-const MAPPER_BY_KEY = { clients: toClient, cases: toCase, tasks: toTask, appts: toAppt, finance: toFinance, events: toEvent, notes: toNote, documents: toDoc, precedents: toPrecedent, contracts: toContract };
+const MAPPER_BY_KEY = { clients: toClient, cases: toCase, tasks: toTask, appts: toAppt, finance: toFinance, events: toEvent, notes: toNote, documents: toDoc, precedents: toPrecedent, contracts: toContract, quotes: toQuote };
 
 async function loadAll() {
-  const [c, cs, t, a, f, ev, no, doc, pr, fs, ct] = await Promise.all([
+  const [c, cs, t, a, f, ev, no, doc, pr, fs, ct, qt] = await Promise.all([
     supabase.from("clients").select("*").order("created_at"),
     supabase.from("cases").select("*").order("created_at"),
     supabase.from("tasks").select("*").order("created_at"),
@@ -195,6 +202,7 @@ async function loadAll() {
     supabase.from("judge_precedents").select("*").order("created_at"),
     supabase.from("finance_settings").select("*").eq("id", 1).maybeSingle(),
     supabase.from("contracts").select("*").order("created_at"),
+    supabase.from("quotes").select("*").order("created_at", { ascending: false }),
   ]);
   return {
     clients: (c.data || []).map(toClient),
@@ -208,6 +216,7 @@ async function loadAll() {
     precedents: (pr.data || []).map(toPrecedent),
     monthlyGoal: fs.data?.monthly_goal || 0,
     contracts: (ct.data || []).map(toContract),
+    quotes: (qt.data || []).map(toQuote),
   };
 }
 
@@ -230,6 +239,14 @@ function toPayload(key, row) {
     start_date: row.startDate, end_date: row.endDate || null,
     monthly_fee: row.monthlyFee || 0, success_fee_label: row.successFeeLabel || null,
     auto_renew: row.autoRenew || false, suspended_since: row.suspendedSince || null,
+  };
+  if (key === "quotes") return {
+    number: row.number, client_id: row.clientId || null,
+    prospect_name: row.clientId ? null : (row.prospectName || null), prospect_contact: row.clientId ? null : (row.prospectContact || null),
+    title: row.title, status: row.status || "rascunho",
+    items: (row.items || []).map((i) => ({ ...i, value: Number(i.value) || 0, qty: Number(i.qty) || 1 })),
+    discount_pct: Number(row.discountPct) || 0, payment_terms: row.paymentTerms || null,
+    validity_days: Number(row.validityDays) || 15, notes: row.notes || null,
   };
   if (key === "documents") return { case_id: row.caseId, name: row.name, drive_link: row.driveLink || null };
   return row;
@@ -1815,6 +1832,7 @@ function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
     { id: "deadlines", label: "Controle de Prazos", icon: Clock },
     { id: "finance", label: "Financeiro", icon: Wallet },
     { id: "contracts", label: "Contratos", icon: FileText },
+    { id: "quotes", label: "Orçamentos", icon: Calculator },
     { id: "clients", label: "Contatos", icon: Users },
     { id: "intake", label: "Cadastros pendentes", icon: CheckSquare },
     ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
@@ -3532,6 +3550,579 @@ function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, 
   );
 }
 
+// --- Orçamentos: catálogo de honorários (base: Tabela de Honorários OAB-SP 2026 × fator por área) ---
+// Valor sugerido = mínimo OAB-SP × fator da área, arredondado para múltiplos de FEE_ROUND.
+// Para ajustar a política de preços, edite FEE_FACTORS (e FEE_CATALOG_RAW se a OAB atualizar a tabela).
+const FEE_ROUND = 50;
+const FEE_FACTORS = {
+  "Consultivo e avulso": 1.5,
+  "Empresarial e societário": 1.8,
+  "Tributário": 1.8,
+  "Administrativo": 1.4,
+  "Juizados Especiais": 1.3,
+  "Cível": 1.4,
+  "Família": 1.3,
+  "Sucessões": 1.4,
+  "Trabalhista": 1.3,
+  "Tribunais e recursos": 1.4,
+  "Condominial": 1.3,
+};
+
+const FEE_CATALOG_RAW = [
+  // Consultivo e avulso
+  ["Consultivo e avulso", "1.1", "Consulta", 539.25, "", ""],
+  ["Consultivo e avulso", "1.1a", "Consulta em condições excepcionais (com exame de documentos)", 1155.52, "", ""],
+  ["Consultivo e avulso", "1.2", "Hora intelectual", 868.96, "", ""],
+  ["Consultivo e avulso", "1.6", "Cobrança amigável (independe dos honorários contratuais)", 1216.54, "10%", "10%"],
+  ["Consultivo e avulso", "1.10", "Elaboração de notificação extrajudicial", 868.96, "", ""],
+  ["Consultivo e avulso", "1.12", "Parecer ou memorial", 3475.84, "", ""],
+  ["Consultivo e avulso", "1.14", "Requerimentos ou petições avulsas", 1216.54, "", ""],
+  ["Consultivo e avulso", "1.16", "Intervenção para solução amigável de qualquer assunto", 3081.42, "", ""],
+  // Empresarial e societário
+  ["Empresarial e societário", "1.8", "Exame e visto em instrumento de constituição de pessoa jurídica", 2085.52, "", ""],
+  ["Empresarial e societário", "1.11", "Minutas de contrato, distrato, alteração, estatuto, testamento, escritura ou documento", 4930.26, "3%", "3%"],
+  ["Empresarial e societário", "Indicativo (d)", "Advocacia de partido, sem vínculo empregatício — valor mensal mínimo", 3081.42, "", ""],
+  ["Empresarial e societário", "4.37", "Ação de dissolução de sociedade", 6951.68, "20%", "20%"],
+  ["Empresarial e societário", "4.13", "Prestação de contas", 10427.52, "", ""],
+  ["Empresarial e societário", "5.1", "Pedido de falência e acompanhamento até a decretação", 5213.74, "20%", "20%"],
+  ["Empresarial e societário", "5.3", "Pedido de recuperação de empresa", 9244.25, "2% a 10%", "5% a 10%"],
+  ["Empresarial e societário", "5.5", "Habilitação tempestiva ou retardatária e divergência de crédito", 4344.8, "20%", "20%"],
+  ["Empresarial e societário", "5.6", "Representação do falido (sobre o montante do passivo)", 8689.58, "20%", "20%"],
+  ["Empresarial e societário", "6.22", "Desconsideração da personalidade jurídica", 10427.52, "20%", "20%"],
+  // Tributário
+  ["Tributário", "9.1", "Procedimento ou defesa administrativa — 1ª instância", 4344.8, "10%", "15%"],
+  ["Tributário", "9.2", "Procedimento ou defesa administrativa — 2ª instância", 4344.8, "10%", "15%"],
+  ["Tributário", "9.3", "Parecer sobre interpretação de normas tributárias, planejamento tributário ou lançamento contra o interessado", 8689.58, "10%", "15%"],
+  ["Tributário", "9.4", "Ação anulatória de débito tributário (sobre o montante excluído)", 10427.52, "15%", "20%"],
+  ["Tributário", "9.5", "Defesa em execução de natureza fiscal (sobre o valor da ação)", 10427.52, "15%", "20%"],
+  ["Tributário", "9.6", "Ação de repetição de indébito (sobre o montante repetido)", 8689.58, "15%", "20%"],
+  ["Tributário", "9.7", "Liberação de mercadorias", 4344.8, "10%", "15%"],
+  ["Tributário", "9.8", "Outros procedimentos em matéria fiscal ou tributária", 4344.8, "10%", "15%"],
+  ["Tributário", "9.9a", "Consultoria sem vínculo empregatício (adm./judicial) — Micro e pequena empresa", 2085.51, "", ""],
+  ["Tributário", "9.9b", "Consultoria sem vínculo empregatício (adm./judicial) — Ltda.", 6082.72, "", ""],
+  ["Tributário", "9.9c", "Consultoria sem vínculo empregatício (adm./judicial) — S/A", 10427.52, "", ""],
+  ["Tributário", "9.9d", "Consultoria sem vínculo empregatício (adm./judicial) — Demais entidades", 4344.8, "", ""],
+  // Administrativo
+  ["Administrativo", "2.1", "Sindicância e processo administrativo — acompanhamento/defesa", 3128.26, "10%", "10%"],
+  ["Administrativo", "2.2", "Processo administrativo — recurso", 6082.72, "5%", "5%"],
+  ["Administrativo", "2.3", "Ação ou defesa — fase administrativa", 10427.52, "20%", "20%"],
+  ["Administrativo", "2.4", "Recurso — fase administrativa", 5213.74, "10%", "10%"],
+  ["Administrativo", "2.5", "Ação ou defesa — fase judicial", 17379.18, "20%", "20%"],
+  ["Administrativo", "2.6", "Recurso — fase judicial", 8689.58, "10%", "10%"],
+  // Juizados Especiais
+  ["Juizados Especiais", "3.1", "Juizado Especial — inicial ou contestação e audiência", 1390.33, "20%", "20%"],
+  ["Juizados Especiais", "3.2", "Juizado Especial — atuação em segunda instância", 1042.75, "10%", "10%"],
+  // Cível
+  ["Cível", "4.1", "Procedimento ordinário: proposição ou defesa", 6256.51, "20%", "20%"],
+  ["Cível", "4.2", "Procedimento sumário: proposição ou defesa", 4344.8, "20%", "20%"],
+  ["Cível", "4.3", "Cumprimento de sentença", 3475.84, "20%", "20%"],
+  ["Cível", "4.4", "Impugnação ao cumprimento de sentença", 3475.84, "20%", "20%"],
+  ["Cível", "4.5", "Execução de título extrajudicial", 3475.84, "20%", "20%"],
+  ["Cível", "4.6", "Impugnação/embargos à execução de título extrajudicial", 3475.84, "20%", "20%"],
+  ["Cível", "4.9", "Processo cautelar inominado: incidental ou preparatório", 4344.8, "20%", "20%"],
+  ["Cível", "4.10", "Consignação em pagamento", 4344.8, "20%", "20%"],
+  ["Cível", "4.17", "Usucapião", 6082.72, "20%", "20%"],
+  ["Cível", "4.24", "Ação monitória", 3081.41, "10%", "10%"],
+  ["Cível", "4.29", "Alvará judicial", 3081.41, "20%", "20%"],
+  ["Cível", "4.31", "Mandado de segurança", 6951.68, "20%", "20%"],
+  ["Cível", "4.32", "Ação ordinária de despejo", 5392.48, "20%", "20%"],
+  ["Cível", "4.33", "Ação renovatória de locação", 5392.48, "20%", "20%"],
+  ["Cível", "4.34", "Ação de revisão e/ou arbitramento de aluguel", 5392.48, "20%", "20%"],
+  ["Cível", "4.38", "Ação de cancelamento de protesto", 4344.8, "15%", "15%"],
+  // Família
+  ["Família", "6.1a", "Divórcio judicial consensual", 7820.64, "", ""],
+  ["Família", "6.1b", "Divórcio judicial consensual cumulado com alimentos e/ou bens", 7820.64, "6%", "6%"],
+  ["Família", "6.1c", "Divórcio judicial litigioso", 12165.42, "", ""],
+  ["Família", "6.1d", "Divórcio litigioso cumulado com alimentos e/ou bens", 12165.42, "10%", "10%"],
+  ["Família", "6.4", "Divórcio extrajudicial em cartório", 4344.8, "6%", "6%"],
+  ["Família", "6.5a", "Dissolução de união estável consensual", 7820.64, "", ""],
+  ["Família", "6.5c", "Dissolução de união estável litigiosa", 12165.42, "", ""],
+  ["Família", "6.9", "Ação de alimentos (proposição/contestação, revisional, exoneração)", 2606.88, "", ""],
+  // Sucessões
+  ["Sucessões", "6.23a", "Inventário/arrolamento/sobrepartilha judicial — sem litígio", 6082.72, "8%", "8%"],
+  ["Sucessões", "6.23b", "Inventário/arrolamento/sobrepartilha judicial — com litígio", 6082.72, "10%", "10%"],
+  ["Sucessões", "6.24", "Inventário negativo", 4344.8, "", ""],
+  ["Sucessões", "6.25", "Inventário/arrolamento/sobrepartilha extrajudicial", 4344.8, "6%", "6%"],
+  ["Sucessões", "6.26", "Reserva de bens", 4344.8, "10%", "10%"],
+  ["Sucessões", "6.27", "Remoção de inventariante", 10427.52, "", ""],
+  ["Sucessões", "6.28", "Ação de colação", 6082.72, "10%", "10%"],
+  ["Sucessões", "6.30", "Ação de sonegados", 10427.52, "20%", "20%"],
+  ["Sucessões", "6.31", "Ação de nulidade de testamento", 12165.42, "", ""],
+  ["Sucessões", "6.33", "Ação de nulidade de partilha", 12165.42, "", ""],
+  ["Sucessões", "6.34", "Ação de habilitação de herdeiros (sobre o valor habilitado)", 4344.8, "10%", "10%"],
+  ["Sucessões", "6.36", "Ação declaratória de indignidade (sobre o quinhão do excluído)", 8168.22, "20%", "20%"],
+  ["Sucessões", "6.38", "Retificação de partilha", 4344.8, "", ""],
+  ["Sucessões", "6.39", "Minuta de testamento e/ou assistência ao ato e abertura de testamento", 6082.72, "", ""],
+  // Trabalhista
+  ["Trabalhista", "8.1", "Patrocínio de reclamante (sobre o valor econômico, condenação ou acordo)", 1737.91, "20% a 30%", "30%"],
+  ["Trabalhista", "8.4", "Patrocínio de reclamado (sobre o valor real do pedido ou valor econômico, pago no início)", 4344.8, "20% a 30%", "20% a 30%"],
+  ["Trabalhista", "8.2", "Acréscimo no caso de recurso ordinário", 1216.54, "5%", "5%"],
+  ["Trabalhista", "8.3", "Acréscimo no caso de recurso de revista e/ou contrarrazões", 1216.54, "5%", "5%"],
+  ["Trabalhista", "8.7a", "Execução de sentença ou embargos — como mandatário específico para o ato", 4344.8, "20%", "20%"],
+  ["Trabalhista", "8.7b", "Execução de sentença ou embargos — se já for mandatário da causa principal, acrescer", 2085.51, "5%", "5%"],
+  ["Trabalhista", "8.21", "Consultoria, sem vínculo empregatício, de empresas com menos de 50 empregados", 8689.58, "", ""],
+  ["Trabalhista", "8.22", "Consultoria, sem vínculo empregatício, de empresa com mais de 50 empregados", 12165.42, "", ""],
+  // Tribunais e recursos
+  ["Tribunais e recursos", "17.1a", "Recurso de agravo de instrumento", 6082.72, "", ""],
+  ["Tribunais e recursos", "17.1b", "Recurso de apelação ou contrarrazões", 8168.22, "", ""],
+  ["Tribunais e recursos", "17.1c", "Embargos declaratórios ou embargos infringentes", 6082.72, "", ""],
+  ["Tribunais e recursos", "17.2a", "Recurso especial e extraordinário (interposição/resposta)", 16510.22, "", ""],
+  ["Tribunais e recursos", "17.2b", "Outros recursos perante tribunais superiores", 12165.42, "", ""],
+  ["Tribunais e recursos", "17.3", "Ação rescisória — proposição ou defesa", 10427.52, "20%", "20%"],
+  ["Tribunais e recursos", "17.5", "Mandado de segurança (perante tribunais)", 12165.42, "", ""],
+  ["Tribunais e recursos", "17.9a", "Sustentação oral — tribunais estaduais, regionais e conselhos estaduais", 8689.58, "", ""],
+  ["Tribunais e recursos", "17.9b", "Sustentação oral — tribunais superiores e conselhos federais", 12165.42, "", ""],
+  // Condominial
+  ["Condominial", "30.1", "Assessoria e consultoria mensal especializada (até 100 unidades)", 1545.51, "", ""],
+  ["Condominial", "30.2", "Consulta em âmbito condominial", 875.64, "", ""],
+  ["Condominial", "30.3", "Cobrança extrajudicial de cotas condominiais/multas", null, "10%", "10%"],
+  ["Condominial", "30.6", "Participação e assessoria ao condomínio em assembleia ou reunião", 1587.1, "", ""],
+  ["Condominial", "30.9", "Ação de impugnação de assembleia", 5691.66, "", ""],
+  ["Condominial", "30.10", "Ação de impugnação de assembleia c/c pedido de liminar", 7114.58, "", ""],
+  ["Condominial", "30.14", "Ação de defesa do síndico", 6567.3, "", ""],
+];
+
+const FEE_CATALOG = FEE_CATALOG_RAW.map(([area, code, desc, min, pctOab, pctSug]) => ({
+  area, code, desc, min, pctOab, pctSug,
+  suggested: min == null ? null : Math.round((min * FEE_FACTORS[area]) / FEE_ROUND) * FEE_ROUND,
+}));
+const FEE_AREAS = Object.keys(FEE_FACTORS);
+
+const QUOTE_STATUS = {
+  rascunho: { label: "Rascunho", bg: "#F1EFE8", color: "#444441" },
+  enviado: { label: "Enviado", bg: "#E6EEF5", color: "#0F2A43" },
+  aceito: { label: "Aceito", bg: "#EAF3DE", color: "#27500A" },
+  recusado: { label: "Recusado", bg: "#FBE3DC", color: "#993D1D" },
+};
+const QUOTE_PAYMENT_PRESETS = [
+  { id: "vista", label: "À vista", text: "Pagamento à vista, na assinatura do contrato de honorários." },
+  { id: "50-50", label: "50% + 50%", text: "50% na assinatura do contrato de honorários e 50% na conclusão do serviço." },
+  { id: "tercos", label: "1/3 + 1/3 + 1/3 (padrão OAB)", text: "1/3 na assinatura do contrato de honorários, 1/3 até a sentença de primeiro grau e 1/3 ao final, atualizados monetariamente." },
+  { id: "3x", label: "Parcelado em 3x", text: "Pagamento em 3 parcelas mensais e iguais, a primeira na assinatura do contrato de honorários." },
+  { id: "6x", label: "Parcelado em 6x", text: "Pagamento em 6 parcelas mensais e iguais, a primeira na assinatura do contrato de honorários." },
+];
+const QUOTE_DEFAULT_NOTES = "Os honorários compreendem apenas o patrocínio da causa em primeiro grau ou o serviço descrito acima; recursos, incidentes processuais e atos fora do escopo serão contratados à parte. Custas, taxas, diligências e demais despesas correm por conta do contratante.";
+const OFFICE_NAME = "Rodrigo Santos Advocacia e Consultoria";
+const OFFICE_LAWYER = "Rodrigo Luiz Chaves de Sousa Santos — OAB/SP 254.676";
+const OFFICE_CONTACT_LINE = "Av. Paulista, nº 1106, 16º andar, Bela Vista, São Paulo – SP · WhatsApp +55 11 93359-6958 · escritorio.rsac@gmail.com";
+
+const normText = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+function nextQuoteNumber(quotes) {
+  const year = new Date().getFullYear();
+  const prefix = `ORC-${year}-`;
+  const nums = quotes.filter((q) => (q.number || "").startsWith(prefix)).map((q) => parseInt((q.number || "").slice(prefix.length), 10) || 0);
+  return prefix + String(Math.max(0, ...nums) + 1).padStart(3, "0");
+}
+
+function quoteTotals(q) {
+  const items = q.items || [];
+  const line = (i) => (Number(i.value) || 0) * (Number(i.qty) || 1);
+  const sub = items.filter((i) => i.kind !== "mensal").reduce((s, i) => s + line(i), 0);
+  const mensal = items.filter((i) => i.kind === "mensal").reduce((s, i) => s + line(i), 0);
+  const disc = sub * ((Number(q.discountPct) || 0) / 100);
+  return { sub, disc, total: sub - disc, mensal };
+}
+
+function quoteValidUntil(q) {
+  const base = q.createdAt ? new Date(q.createdAt) : new Date();
+  base.setDate(base.getDate() + (Number(q.validityDays) || 15));
+  return base.toISOString().slice(0, 10);
+}
+
+function quoteToText(q, recipientName) {
+  const t = quoteTotals(q);
+  const lines = [];
+  lines.push("*Proposta de Honorários — RSAC*");
+  lines.push(`Nº ${q.number} · ${fmtDate(q.createdAt ? q.createdAt.slice(0, 10) : todayISO())}`);
+  lines.push("");
+  lines.push(`Prezado(a) ${recipientName || "cliente"},`);
+  lines.push("");
+  lines.push(`Segue nossa proposta de honorários para: *${q.title || "serviço jurídico"}*`);
+  lines.push("");
+  lines.push("*Serviços e valores*");
+  (q.items || []).forEach((i) => {
+    const qty = Number(i.qty) > 1 ? ` (x${Number(i.qty)})` : "";
+    lines.push(`• ${i.description} — ${fmtBRL(i.value)}${i.kind === "mensal" ? "/mês" : ""}${qty}`);
+    if (i.exito) lines.push(`   Êxito: ${i.exito}`);
+  });
+  lines.push("");
+  if (t.sub > 0) {
+    if (t.disc > 0) lines.push(`Subtotal: ${fmtBRL(t.sub)} · Desconto (${Number(q.discountPct)}%): -${fmtBRL(t.disc)}`);
+    lines.push(`*Total: ${fmtBRL(t.total)}*`);
+  }
+  if (t.mensal > 0) lines.push(`*Mensal: ${fmtBRL(t.mensal)}/mês*`);
+  if (q.paymentTerms) { lines.push(""); lines.push("*Condições de pagamento*"); lines.push(q.paymentTerms); }
+  if (q.notes) { lines.push(""); lines.push(q.notes); }
+  lines.push("");
+  lines.push(`Validade da proposta: até ${fmtDate(quoteValidUntil(q))}.`);
+  lines.push("");
+  lines.push(OFFICE_LAWYER);
+  lines.push(OFFICE_NAME);
+  return lines.join("\n");
+}
+
+function quotePrintHTML(q, recipient) {
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>");
+  const t = quoteTotals(q);
+  const rows = (q.items || []).map((i) => {
+    const qty = Number(i.qty) || 1;
+    const line = (Number(i.value) || 0) * qty;
+    return `<tr>
+      <td><div>${esc(i.description)}</div>${i.exito ? `<div class="sub">Êxito: ${esc(i.exito)}</div>` : ""}</td>
+      <td class="c">${qty}</td>
+      <td class="r">${esc(fmtBRL(i.value))}${i.kind === "mensal" ? "<div class=\"sub\">por mês</div>" : ""}</td>
+      <td class="r">${esc(fmtBRL(line))}${i.kind === "mensal" ? "<div class=\"sub\">por mês</div>" : ""}</td>
+    </tr>`;
+  }).join("");
+  const dateStr = fmtDate(q.createdAt ? q.createdAt.slice(0, 10) : todayISO());
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Proposta ${esc(q.number)}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #2C2C2A; font-size: 12.5px; line-height: 1.5; margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .head { background: ${NAVY}; color: #EDE6D8; text-align: center; padding: 22px 0 18px; margin-bottom: 22px; }
+  .brand { font-size: 28px; letter-spacing: 0.34em; padding-left: 0.34em; }
+  .rule { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 0 6px; }
+  .rule i { display: block; width: 44px; height: 1px; background: ${GOLD}; }
+  .rule b { display: block; width: 4px; height: 4px; border-radius: 4px; background: ${GOLD}; }
+  .office { font-size: 8.5px; letter-spacing: 0.2em; color: rgba(240,234,221,0.7); }
+  h1 { font-size: 18px; color: ${NAVY}; margin: 0 0 2px; letter-spacing: 0.04em; }
+  .meta { color: #6b6a63; font-size: 11.5px; margin-bottom: 18px; }
+  .box { border: 1px solid #E3E0D6; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; }
+  .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b6a63; margin-bottom: 2px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  th { text-align: left; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #6b6a63; border-bottom: 1.5px solid ${NAVY}; padding: 6px 8px; }
+  td { padding: 9px 8px; border-bottom: 1px solid #EAE7DC; vertical-align: top; }
+  .c { text-align: center; width: 48px; } .r { text-align: right; width: 118px; white-space: nowrap; }
+  .sub { font-size: 10.5px; color: #6b6a63; font-style: italic; }
+  .tot { margin-left: auto; width: 290px; margin-bottom: 18px; }
+  .tot div { display: flex; justify-content: space-between; padding: 3px 0; }
+  .tot .grand { border-top: 1.5px solid ${NAVY}; margin-top: 4px; padding-top: 7px; font-size: 15px; color: ${NAVY}; font-weight: bold; }
+  h2 { font-size: 13px; color: ${NAVY}; margin: 16px 0 4px; }
+  .sign { margin-top: 38px; text-align: center; }
+  .sign .line { width: 260px; border-top: 1px solid #2C2C2A; margin: 0 auto 6px; }
+  .foot { margin-top: 26px; padding-top: 10px; border-top: 1px solid ${GOLD}; text-align: center; font-size: 10.5px; color: #6b6a63; }
+  .avoid { page-break-inside: avoid; }
+</style></head><body>
+<div class="head"><div class="brand">RSAC</div><div class="rule"><i></i><b></b><i></i></div><div class="office">RODRIGO SANTOS ADVOCACIA E CONSULTORIA</div></div>
+<h1>PROPOSTA DE HONORÁRIOS</h1>
+<div class="meta">Nº ${esc(q.number)} · Emitida em ${esc(dateStr)} · Válida até ${esc(fmtDate(quoteValidUntil(q)))}</div>
+<div class="box"><div class="lbl">Destinatário</div><div><b>${esc(recipient.name || "—")}</b>${recipient.contact ? `<br/>${esc(recipient.contact)}` : ""}</div></div>
+<div class="box"><div class="lbl">Objeto</div><div>${esc(q.title || "—")}</div></div>
+<table><thead><tr><th>Serviço</th><th class="c">Qtd.</th><th class="r">Valor</th><th class="r">Total</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="tot avoid">
+  ${t.sub > 0 ? `<div><span>Honorários</span><span>${esc(fmtBRL(t.sub))}</span></div>` : ""}
+  ${t.disc > 0 ? `<div><span>Desconto (${esc(Number(q.discountPct))}%)</span><span>- ${esc(fmtBRL(t.disc))}</span></div>` : ""}
+  ${t.sub > 0 ? `<div class="grand"><span>Total</span><span>${esc(fmtBRL(t.total))}</span></div>` : ""}
+  ${t.mensal > 0 ? `<div class="${t.sub > 0 ? "" : "grand"}"><span>Mensalidade</span><span>${esc(fmtBRL(t.mensal))}/mês</span></div>` : ""}
+</div>
+${q.paymentTerms ? `<div class="avoid"><h2>Condições de pagamento</h2><div>${esc(q.paymentTerms)}</div></div>` : ""}
+${q.notes ? `<div class="avoid"><h2>Observações</h2><div>${esc(q.notes)}</div></div>` : ""}
+<div class="sign avoid"><div class="line"></div><div>${esc(OFFICE_LAWYER)}</div><div class="sub">${esc(OFFICE_NAME)}</div></div>
+<div class="foot">${esc(OFFICE_CONTACT_LINE)}</div>
+</body></html>`;
+}
+
+function printQuote(q, recipient) {
+  const w = window.open("", "_blank");
+  if (!w) { alert("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente."); return; }
+  w.document.open();
+  w.document.write(quotePrintHTML(q, recipient));
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch (e) { console.error(e); } }, 500);
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch (e) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch (e2) { return false; }
+  }
+}
+
+function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
+  const [view, setView] = useState("list");
+  const [statusFilter, setStatusFilter] = useState("todos");
+  const [search, setSearch] = useState("");
+  const [draft, setDraft] = useState(null);
+  const [catQuery, setCatQuery] = useState("");
+  const [catArea, setCatArea] = useState("todas");
+  const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const recipientOf = (q) => {
+    const c = q.clientId ? clients.find((cl) => cl.id === q.clientId) : null;
+    return c
+      ? { name: c.name, contact: [c.email, c.phone].filter(Boolean).join(" · ") }
+      : { name: q.prospectName || "", contact: q.prospectContact || "" };
+  };
+
+  const startNew = () => {
+    setDraft({
+      id: null, number: nextQuoteNumber(quotes), clientId: "", prospectName: "", prospectContact: "",
+      title: "", status: "rascunho", items: [], discountPct: 0,
+      paymentTerms: QUOTE_PAYMENT_PRESETS[2].text, validityDays: 15, notes: QUOTE_DEFAULT_NOTES, createdAt: null,
+    });
+    setCatQuery(""); setCatArea("todas"); setView("edit");
+  };
+  const startEdit = (q) => {
+    setDraft({ ...q, clientId: q.clientId || "", items: (q.items || []).map((i) => ({ ...i })) });
+    setCatQuery(""); setCatArea("todas"); setView("edit");
+  };
+  const patch = (p) => setDraft((d) => ({ ...d, ...p }));
+  const patchItem = (id, p) => setDraft((d) => ({ ...d, items: d.items.map((i) => (i.id === id ? { ...i, ...p } : i)) }));
+  const removeItem = (id) => setDraft((d) => ({ ...d, items: d.items.filter((i) => i.id !== id) }));
+  const addCatalogItem = (f) => setDraft((d) => ({
+    ...d,
+    items: [...d.items, {
+      id: uid(), code: f.code, area: f.area, description: f.desc, value: f.suggested ?? 0, qty: 1, kind: "fixo",
+      exito: f.pctSug ? `${f.pctSug} sobre o proveito econômico obtido` : "", min: f.min,
+    }],
+  }));
+  const addCustomItem = () => setDraft((d) => ({
+    ...d, items: [...d.items, { id: uid(), code: "", area: "", description: "", value: 0, qty: 1, kind: "fixo", exito: "", min: null }],
+  }));
+
+  const submit = async () => {
+    if (!draft.title.trim()) { alert("Informe o objeto da proposta (ex.: Ação de repetição de indébito)."); return; }
+    if (!draft.clientId && !draft.prospectName.trim()) { alert("Selecione um cliente ou informe o nome do destinatário."); return; }
+    if (draft.items.length === 0) { alert("Adicione ao menos um serviço."); return; }
+    setSaving(true);
+    await onSave({ ...draft, clientId: draft.clientId || null }, draft.id);
+    setSaving(false);
+    setView("list");
+  };
+
+  const doCopy = async () => {
+    const ok = await copyText(quoteToText(draft, recipientOf(draft).name));
+    setCopied(ok);
+    if (!ok) alert("Não foi possível copiar automaticamente. Tente novamente.");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const countBy = (s) => quotes.filter((q) => q.status === s).length;
+  const sumBy = (s) => quotes.filter((q) => q.status === s).reduce((acc, q) => acc + quoteTotals(q).total, 0);
+
+  // ---------- Editor ----------
+  if (view === "edit" && draft) {
+    const t = quoteTotals(draft);
+    const hasQuery = catQuery.trim() || catArea !== "todas";
+    const results = hasQuery
+      ? FEE_CATALOG.filter((f) => (catArea === "todas" || f.area === catArea)
+          && (!catQuery.trim() || normText(`${f.code} ${f.desc} ${f.area}`).includes(normText(catQuery.trim())))).slice(0, 12)
+      : [];
+    return (
+      <div>
+        <button onClick={() => setView("list")} style={{ background: "none", border: "none", color: MUTED, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 10 }}>← Voltar</button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+          <div>
+            <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: 0 }}>{draft.id ? "Editar orçamento" : "Novo orçamento"}</h1>
+            <p style={{ color: MUTED, fontSize: 13, margin: "4px 0 0" }}>{draft.number}</p>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => printQuote(draft, recipientOf(draft))} style={{ background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 14px", fontSize: 13, cursor: "pointer", color: NAVY }}>Gerar PDF</button>
+            <button onClick={doCopy} style={{ background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 14px", fontSize: 13, cursor: "pointer", color: NAVY }}>{copied ? "Copiado!" : "Copiar texto"}</button>
+            <button onClick={submit} disabled={saving} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "9px 18px", fontSize: 13, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "Salvando..." : "Salvar"}</button>
+          </div>
+        </div>
+
+        <SectionCard title="Destinatário e objeto">
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 260px" }}>
+              <Field label="Cliente cadastrado">
+                <select style={inputStyle} value={draft.clientId} onChange={(e) => patch({ clientId: e.target.value })}>
+                  <option value="">— prospecto (digitar abaixo) —</option>
+                  {sortByName(clients).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </Field>
+            </div>
+            {!draft.clientId && (
+              <>
+                <div style={{ flex: "1 1 200px" }}><Field label="Nome do prospecto"><input style={inputStyle} value={draft.prospectName} onChange={(e) => patch({ prospectName: e.target.value })} placeholder="Nome ou razão social" /></Field></div>
+                <div style={{ flex: "1 1 200px" }}><Field label="Contato (e-mail / telefone)"><input style={inputStyle} value={draft.prospectContact} onChange={(e) => patch({ prospectContact: e.target.value })} /></Field></div>
+              </>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "3 1 300px" }}><Field label="Objeto da proposta"><input style={inputStyle} value={draft.title} onChange={(e) => patch({ title: e.target.value })} placeholder="Ex.: Ação anulatória de débito tributário — ICMS 2022" /></Field></div>
+            <div style={{ flex: "1 1 120px" }}><Field label="Validade (dias)"><input type="number" min="1" style={inputStyle} value={draft.validityDays} onChange={(e) => patch({ validityDays: e.target.value })} /></Field></div>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Serviços">
+          <div style={{ background: "#F5F3EC", border: "1px solid #EAE7DC", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: MUTED, marginBottom: 8 }}>Adicionar da tabela de honorários (mínimo OAB-SP 2026 × fator RSAC)</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input style={{ ...inputStyle, flex: "2 1 220px", width: "auto" }} value={catQuery} onChange={(e) => setCatQuery(e.target.value)} placeholder="Buscar serviço (ex.: repetição, inventário, divórcio...)" />
+              <select style={{ ...inputStyle, flex: "1 1 180px", width: "auto" }} value={catArea} onChange={(e) => setCatArea(e.target.value)}>
+                <option value="todas">Todas as áreas</option>
+                {FEE_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <button onClick={addCustomItem} style={{ background: "#fff", border: "1px solid #E3E0D6", borderRadius: 6, padding: "8px 12px", fontSize: 13, cursor: "pointer", color: NAVY }}>+ Item avulso</button>
+            </div>
+            {hasQuery && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                {results.length === 0 && <div style={{ fontSize: 13, color: MUTED }}>Nenhum serviço encontrado. Use “Item avulso”.</div>}
+                {results.map((f) => (
+                  <div key={f.area + f.code} onClick={() => addCatalogItem(f)} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", background: "#fff", border: "1px solid #EAE7DC", borderRadius: 6, padding: "8px 12px", cursor: "pointer" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: INK }}>{f.desc}</div>
+                      <div style={{ fontSize: 11.5, color: MUTED }}>{f.area} · item {f.code}{f.pctOab ? ` · OAB: ${f.pctOab}` : ""}</div>
+                    </div>
+                    <div style={{ fontSize: 13, color: NAVY, fontWeight: 600, whiteSpace: "nowrap" }}>{f.suggested != null ? fmtBRL(f.suggested) : "só %"}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {draft.items.length === 0 && <Empty text="Nenhum serviço adicionado. Busque na tabela acima ou crie um item avulso." />}
+          {draft.items.map((i) => {
+            const below = i.min != null && Number(i.value) > 0 && Number(i.value) < i.min && i.kind !== "mensal";
+            return (
+              <div key={i.id} style={{ border: "1px solid #EAE7DC", borderRadius: 8, padding: 12, marginBottom: 10, background: "#fff" }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+                  <div style={{ flex: "3 1 280px" }}>
+                    <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 3 }}>Descrição{i.code ? ` · item OAB ${i.code}` : ""}</div>
+                    <textarea style={{ ...inputStyle, minHeight: 54, resize: "vertical" }} value={i.description} onChange={(e) => patchItem(i.id, { description: e.target.value })} />
+                  </div>
+                  <div style={{ flex: "1 1 130px" }}>
+                    <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 3 }}>Valor (R$)</div>
+                    <input type="number" min="0" step="0.01" style={inputStyle} value={i.value} onChange={(e) => patchItem(i.id, { value: e.target.value })} />
+                  </div>
+                  <div style={{ flex: "0 1 70px" }}>
+                    <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 3 }}>Qtd.</div>
+                    <input type="number" min="1" style={inputStyle} value={i.qty} onChange={(e) => patchItem(i.id, { qty: e.target.value })} />
+                  </div>
+                  <div style={{ flex: "1 1 110px" }}>
+                    <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 3 }}>Cobrança</div>
+                    <select style={inputStyle} value={i.kind} onChange={(e) => patchItem(i.id, { kind: e.target.value })}>
+                      <option value="fixo">Valor fixo</option>
+                      <option value="mensal">Mensal</option>
+                    </select>
+                  </div>
+                  <button onClick={() => removeItem(i.id)} title="Remover" style={{ background: "none", border: "none", cursor: "pointer", color: "#C0997B", marginTop: 20 }}><Trash2 size={16} /></button>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <input style={inputStyle} value={i.exito || ""} onChange={(e) => patchItem(i.id, { exito: e.target.value })} placeholder="Êxito (opcional) — ex.: 20% sobre o proveito econômico obtido" />
+                </div>
+                {i.min != null && (
+                  <div style={{ fontSize: 11.5, marginTop: 6, color: below ? "#993D1D" : MUTED }}>
+                    {below ? "Atenção: valor abaixo do mínimo da tabela OAB-SP 2026 " : "Mínimo OAB-SP 2026: "}({fmtBRL(i.min)}).
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </SectionCard>
+
+        <SectionCard title="Condições">
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 160px" }}>
+              <Field label="Desconto sobre honorários fixos (%)"><input type="number" min="0" max="100" step="0.5" style={inputStyle} value={draft.discountPct} onChange={(e) => patch({ discountPct: e.target.value })} /></Field>
+            </div>
+            <div style={{ flex: "2 1 260px" }}>
+              <Field label="Forma de pagamento (modelo)">
+                <select style={inputStyle} value="" onChange={(e) => { const p = QUOTE_PAYMENT_PRESETS.find((x) => x.id === e.target.value); if (p) patch({ paymentTerms: p.text }); }}>
+                  <option value="">Escolher modelo...</option>
+                  {QUOTE_PAYMENT_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </Field>
+            </div>
+          </div>
+          <Field label="Condições de pagamento (texto da proposta)"><textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={draft.paymentTerms} onChange={(e) => patch({ paymentTerms: e.target.value })} /></Field>
+          <Field label="Observações"><textarea style={{ ...inputStyle, minHeight: 80, resize: "vertical" }} value={draft.notes} onChange={(e) => patch({ notes: e.target.value })} /></Field>
+        </SectionCard>
+
+        <div style={{ background: NAVY, borderRadius: 10, padding: "18px 22px", color: "#f5efe4", display: "flex", gap: 28, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {t.disc > 0 && <div><div style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(240,234,221,0.6)" }}>Desconto</div><div style={{ fontFamily: "Georgia, serif", fontSize: 20 }}>- {fmtBRL(t.disc)}</div></div>}
+          <div><div style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(240,234,221,0.6)" }}>Total (valor fixo)</div><div style={{ fontFamily: "Georgia, serif", fontSize: 28 }}>{fmtBRL(t.total)}</div></div>
+          {t.mensal > 0 && <div><div style={{ fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(240,234,221,0.6)" }}>Mensalidade</div><div style={{ fontFamily: "Georgia, serif", fontSize: 28 }}>{fmtBRL(t.mensal)}<span style={{ fontSize: 14, color: "rgba(240,234,221,0.6)" }}>/mês</span></div></div>}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- Lista ----------
+  const filtered = quotes
+    .filter((q) => statusFilter === "todos" || q.status === statusFilter)
+    .filter((q) => {
+      if (!search.trim()) return true;
+      const r = recipientOf(q);
+      return normText(`${q.number} ${q.title} ${r.name}`).includes(normText(search.trim()));
+    });
+  const FILTERS = [{ id: "todos", label: "Todos", count: quotes.length }, ...Object.keys(QUOTE_STATUS).map((s) => ({ id: s, label: QUOTE_STATUS[s].label, count: countBy(s) }))];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontFamily: "Georgia, serif", fontSize: 28, color: NAVY, margin: 0 }}>Orçamentos</h1>
+          <p style={{ fontSize: 13, color: MUTED, margin: "6px 0 0" }}>Propostas de honorários com base na tabela OAB-SP 2026.</p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar orçamento" style={{ border: "1px solid #E3E0D6", borderRadius: 6, padding: "9px 12px", fontSize: 13 }} />
+          <button onClick={startNew} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>+ Novo orçamento</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+        <StatCard icon={FileText} label="Rascunhos" value={countBy("rascunho")} />
+        <StatCard icon={Mail} label="Enviados (honorários fixos)" value={fmtBRL(sumBy("enviado"))} />
+        <StatCard icon={Check} label="Aceitos (honorários fixos)" value={fmtBRL(sumBy("aceito"))} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+        {FILTERS.map((f) => (
+          <span key={f.id} onClick={() => setStatusFilter(f.id)} style={{
+            fontSize: 13, padding: "7px 14px", borderRadius: 20, cursor: "pointer",
+            background: statusFilter === f.id ? NAVY : "#fff", color: statusFilter === f.id ? "#EDE6D8" : NAVY,
+            border: statusFilter === f.id ? "none" : "1px solid #E3E0D6", fontWeight: statusFilter === f.id ? 600 : 400,
+          }}>{f.label} · {f.count}</span>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {filtered.length === 0 && <Empty text="Nenhum orçamento encontrado." />}
+        {filtered.map((q) => {
+          const r = recipientOf(q);
+          const t = quoteTotals(q);
+          const st = QUOTE_STATUS[q.status] || QUOTE_STATUS.rascunho;
+          const expired = q.status === "enviado" && quoteValidUntil(q) < todayISO();
+          return (
+            <div key={q.id} onClick={() => startEdit(q)} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px", display: "flex", gap: 18, alignItems: "center", cursor: "pointer", flexWrap: "wrap" }}>
+              <div style={{ flex: "2 1 240px", minWidth: 0 }}>
+                <div style={{ fontSize: 15.5, color: "#23201a", marginBottom: 3 }}>{q.title}</div>
+                <div style={{ fontSize: 12.5, color: "#857d6c" }}>{q.number} · {r.name || "—"} · {fmtDate(q.createdAt ? q.createdAt.slice(0, 10) : null)}</div>
+              </div>
+              <div style={{ flex: "1 1 150px" }}>
+                {t.sub > 0 && <div style={{ fontFamily: "Georgia, serif", fontSize: 19, color: "#23201a" }}>{fmtBRL(t.total)}</div>}
+                {t.mensal > 0 && <div style={{ fontSize: 12.5, color: "#857d6c" }}>+ {fmtBRL(t.mensal)}/mês</div>}
+                <div style={{ fontSize: 11.5, color: expired ? "#c04a40" : "#857d6c", fontWeight: expired ? 600 : 400 }}>{expired ? "Proposta vencida" : `Válida até ${fmtDate(quoteValidUntil(q))}`}</div>
+              </div>
+              <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <select value={q.status} onChange={(e) => onSetStatus(q.id, e.target.value)} style={{ border: "none", borderRadius: 20, padding: "5px 10px", fontSize: 12, fontWeight: 600, background: st.bg, color: st.color, cursor: "pointer" }}>
+                  {Object.keys(QUOTE_STATUS).map((s) => <option key={s} value={s}>{QUOTE_STATUS[s].label}</option>)}
+                </select>
+                <span onClick={() => { if (window.confirm(`Excluir o orçamento ${q.number}?`)) onDelete(q.id); }} style={{ fontSize: 11.5, color: "#C0997B", cursor: "pointer" }}>Excluir</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function IntakeReviewTab({ onUseSubmission }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3936,6 +4527,7 @@ export default function RSACApp() {
   const [caseTypesCatalog, setCaseTypesCatalog] = useState([]);
   const [caseTypesByCaseId, setCaseTypesByCaseId] = useState({});
   const [contracts, setContracts] = useState([]);
+  const [quotes, setQuotes] = useState([]);
   const [contractCaseIds, setContractCaseIds] = useState({});
   const [contractTypesByContractId, setContractTypesByContractId] = useState({});
   const [editingContract, setEditingContract] = useState(null);
@@ -3963,6 +4555,7 @@ export default function RSACApp() {
       setEvents(d.events); setNotes(d.notes); setDocuments(d.documents); setPrecedents(d.precedents);
       setMonthlyGoal(d.monthlyGoal || 0);
       setContracts(d.contracts);
+      setQuotes(d.quotes || []);
       const { catalog, byCaseId } = await fetchCaseTypesData();
       setCaseTypesCatalog(catalog); setCaseTypesByCaseId(byCaseId);
       const { caseIdsByContract, typesByContract } = await fetchContractRelations();
@@ -4041,6 +4634,28 @@ export default function RSACApp() {
     await removeRow("contracts", id);
     setContractCaseIds((prev) => { const n = { ...prev }; delete n[id]; return n; });
     setContractTypesByContractId((prev) => { const n = { ...prev }; delete n[id]; return n; });
+  }, []);
+
+  const handleSaveQuote = useCallback(async (values, id) => {
+    if (id) {
+      const saved = await editRow("quotes", id, values);
+      if (saved) setQuotes((prev) => prev.map((q) => (q.id === id ? saved : q)));
+      else alert("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
+    } else {
+      const saved = await insertRow("quotes", values);
+      if (saved) setQuotes((prev) => [saved, ...prev]);
+      else alert("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
+    }
+  }, []);
+
+  const handleSetQuoteStatus = useCallback(async (id, status) => {
+    await updateRow("quotes", id, { status });
+    setQuotes((prev) => prev.map((q) => (q.id === id ? { ...q, status } : q)));
+  }, []);
+
+  const handleDeleteQuote = useCallback(async (id) => {
+    await deleteRow("quotes", id);
+    setQuotes((prev) => prev.filter((q) => q.id !== id));
   }, []);
 
   const handleAddNote = useCallback(async (caseId, values) => {
@@ -4205,6 +4820,7 @@ export default function RSACApp() {
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
     { id: "finance", label: "Financeiro", icon: Wallet },
     { id: "contracts", label: "Contratos", icon: FileText },
+    { id: "quotes", label: "Orçamentos", icon: Calculator },
   ];
   const SECONDARY_NAV = [
     { id: "clients", label: "Contatos", icon: Users },
@@ -4354,6 +4970,12 @@ export default function RSACApp() {
                   onOpenCase={(id) => { setActiveCaseId(id); }} />
               </div>
             )}
+            {mobileTab === "quotes" && (
+              <div style={{ padding: "16px 18px 100px" }}>
+                <QuotesPage quotes={quotes} clients={clients}
+                  onSave={handleSaveQuote} onDelete={handleDeleteQuote} onSetStatus={handleSetQuoteStatus} />
+              </div>
+            )}
             {mobileTab === "clients" && (
               <div style={{ padding: "16px 18px 100px" }}>
                 {viewClient ? (
@@ -4396,7 +5018,7 @@ export default function RSACApp() {
                   onAdd={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }} />
               </div>
             )}
-            <MobileBottomNav active={["clients", "finance", "newsletter", "intake", "deadlines"].includes(mobileTab) ? "more" : mobileTab}
+            <MobileBottomNav active={["clients", "finance", "newsletter", "intake", "deadlines", "quotes"].includes(mobileTab) ? "more" : mobileTab}
               onNavigate={(id) => { if (id === "more") setMobileMoreOpen(true); else goToTab(id); }}
               onAdd={floatingAddAction || (() => {})}
               hasTodayAlertByTab={hasTodayAlertByTab} />
@@ -4834,6 +5456,11 @@ export default function RSACApp() {
             onDelete={(id) => handleDeleteContract(id)}
             onToggleSuspend={handleToggleSuspendContract}
             onOpenCase={(id) => openCase(id)} />
+        )}
+
+        {tab === "quotes" && (
+          <QuotesPage quotes={quotes} clients={clients}
+            onSave={handleSaveQuote} onDelete={handleDeleteQuote} onSetStatus={handleSetQuoteStatus} />
         )}
 
         {tab === "intake" && (
