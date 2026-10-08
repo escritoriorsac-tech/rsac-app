@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import {
   LayoutDashboard, Users, Briefcase, CheckSquare, Calendar as CalendarIcon,
   Wallet, Plus, X, Trash2, Search, LogOut, Pencil, Mail, Check, FileText,
-  MapPin, Linkedin, MessageCircle, Clock, AlertTriangle, Calculator
+  MapPin, Linkedin, MessageCircle, Clock, AlertTriangle, Calculator, UserCog
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -1339,10 +1339,6 @@ function LoginScreen({ onClientPortalAccess }) {
     if (mode === "login") {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (error) setError(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos." : error.message);
-    } else {
-      const { error } = await supabase.auth.signUp({ email: email.trim(), password });
-      if (error) setError(error.message);
-      else setInfo("Conta criada. Se a confirmação por e-mail estiver ativa no seu projeto, verifique a caixa de entrada antes de entrar.");
     }
     setBusy(false);
   };
@@ -1381,11 +1377,7 @@ function LoginScreen({ onClientPortalAccess }) {
             {busy ? "Aguarde…" : mode === "login" ? "Entrar" : "Criar conta"}
           </button>
           <div style={{ textAlign: "center", marginTop: 14, fontSize: 12.5, color: MUTED }}>
-            {mode === "login" ? (
-              <>Ainda não tem conta? <a href="#" onClick={(e) => { e.preventDefault(); setMode("signup"); setError(""); setInfo(""); }} style={{ color: NAVY }}>Criar acesso</a></>
-            ) : (
-              <>Já tem conta? <a href="#" onClick={(e) => { e.preventDefault(); setMode("login"); setError(""); setInfo(""); }} style={{ color: NAVY }}>Entrar</a></>
-            )}
+            Acesso restrito. Para obter um login, fale com o administrador do escritório.
           </div>
         </div>
 
@@ -1830,12 +1822,14 @@ function MobileBottomNav({ active, onNavigate, onAdd, hasTodayAlertByTab }) {
 function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
   const items = [
     { id: "deadlines", label: "Controle de Prazos", icon: Clock },
-    { id: "finance", label: "Financeiro", icon: Wallet },
-    { id: "contracts", label: "Contratos", icon: FileText },
-    { id: "quotes", label: "Orçamentos", icon: Calculator },
+    ...(role === "admin" ? [
+      { id: "finance", label: "Financeiro", icon: Wallet },
+      { id: "contracts", label: "Contratos", icon: FileText },
+      { id: "quotes", label: "Orçamentos", icon: Calculator },
+    ] : []),
     { id: "clients", label: "Contatos", icon: Users },
     { id: "intake", label: "Cadastros pendentes", icon: CheckSquare },
-    ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
+    ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }, { id: "team", label: "Equipe", icon: UserCog }] : []),
   ];
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(18,40,63,0.4)", zIndex: 50, display: "flex", alignItems: "flex-end" }} onClick={onClose}>
@@ -4123,6 +4117,149 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
   );
 }
 
+// ===== Equipe (gestão de acessos — somente administrador) =====
+async function callAdminUsers(body) {
+  const { data, error } = await supabase.functions.invoke("admin-users", { body });
+  if (error) {
+    let msg = error.message || "Falha na chamada.";
+    try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch (e) { /* mantém msg */ }
+    throw new Error(msg);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+const ROLE_LABEL = { admin: "Administrador", staff: "Colaborador" };
+
+function TeamPage({ currentUserId }) {
+  const [users, setUsers] = useState([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+  const [nu, setNu] = useState({ fullName: "", email: "", password: "", role: "staff" });
+  const [creating, setCreating] = useState(false);
+  const [pwFor, setPwFor] = useState(null);
+  const [newPw, setNewPw] = useState("");
+
+  const refresh = useCallback(async () => {
+    setErr("");
+    try {
+      const d = await callAdminUsers({ action: "list" });
+      setUsers(d.users || []);
+    } catch (e) { setErr(e.message); }
+    setLoadingList(false);
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const create = async () => {
+    setErr("");
+    if (!nu.fullName.trim() || !nu.email.trim()) { setErr("Informe nome e e-mail."); return; }
+    if (nu.password.length < 8) { setErr("A senha provisória deve ter ao menos 8 caracteres."); return; }
+    setCreating(true);
+    try {
+      await callAdminUsers({ action: "create", email: nu.email.trim(), password: nu.password, fullName: nu.fullName.trim(), role: nu.role });
+      setNu({ fullName: "", email: "", password: "", role: "staff" });
+      setShowNew(false);
+      await refresh();
+    } catch (e) { setErr(e.message); }
+    setCreating(false);
+  };
+
+  const patch = async (id, fields) => {
+    setErr(""); setBusyId(id);
+    try { await callAdminUsers({ action: "update", id, ...fields }); await refresh(); }
+    catch (e) { setErr(e.message); }
+    setBusyId(null);
+  };
+
+  const savePw = async (id) => {
+    if (newPw.length < 8) { setErr("A nova senha deve ter ao menos 8 caracteres."); return; }
+    await patch(id, { password: newPw });
+    setPwFor(null); setNewPw("");
+  };
+
+  const chip = (txt, bg, fg) => <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: bg, color: fg, fontWeight: 600 }}>{txt}</span>;
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Equipe</h1>
+          <p style={{ color: MUTED, fontSize: 13.5, margin: 0 }}>Quem acessa o sistema. Colaboradores não veem Financeiro, Contratos, Orçamentos nem Newsletter e não excluem registros.</p>
+        </div>
+        <button onClick={() => { setShowNew((v) => !v); setErr(""); }} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13.5, cursor: "pointer" }}>
+          {showNew ? "Cancelar" : "+ Novo acesso"}
+        </button>
+      </div>
+
+      {err && <div style={{ color: "#993D1D", background: "#FBEFEA", border: "1px solid #F0D2C7", borderRadius: 6, padding: "8px 12px", fontSize: 13, marginBottom: 12 }}>{err}</div>}
+
+      {showNew && (
+        <div style={{ background: "#fff", border: "1px solid #EAE7DC", borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <Field label="Nome completo"><input style={inputStyle} value={nu.fullName} onChange={(e) => setNu({ ...nu, fullName: e.target.value })} /></Field>
+          <Field label="E-mail (será o login)"><input style={inputStyle} type="email" value={nu.email} onChange={(e) => setNu({ ...nu, email: e.target.value })} /></Field>
+          <Field label="Senha provisória (mín. 8 caracteres)"><input style={inputStyle} type="text" autoComplete="off" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} /></Field>
+          <Field label="Perfil">
+            <select style={inputStyle} value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })}>
+              <option value="staff">Colaborador</option>
+              <option value="admin">Administrador (acesso total)</option>
+            </select>
+          </Field>
+          <button onClick={create} disabled={creating} style={{ background: GOLD, color: NAVY, border: "none", borderRadius: 6, padding: "9px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+            {creating ? "Criando…" : "Criar acesso"}
+          </button>
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>Envie a senha provisória ao colaborador por canal seguro e peça para trocá-la.</div>
+        </div>
+      )}
+
+      {loadingList && <div style={{ color: MUTED, fontSize: 13.5 }}>Carregando…</div>}
+
+      {users.map((u) => {
+        const self = u.id === currentUserId;
+        const busy = busyId === u.id;
+        return (
+          <div key={u.id} style={{ background: "#fff", border: "1px solid #EAE7DC", borderRadius: 8, padding: "12px 14px", marginBottom: 8, opacity: u.active ? 1 : 0.6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, color: INK, fontWeight: 600 }}>{u.fullName || u.email} {self && <span style={{ color: MUTED, fontWeight: 400 }}>(você)</span>}</div>
+                <div style={{ fontSize: 12.5, color: MUTED }}>{u.email}</div>
+                <div style={{ fontSize: 11.5, color: MUTED, marginTop: 2 }}>
+                  {u.lastSignInAt ? `Último acesso: ${new Date(u.lastSignInAt).toLocaleString("pt-BR")}` : "Nunca acessou"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {u.role === "admin" ? chip("Administrador", "#EDE6D8", NAVY) : chip("Colaborador", "#E7EEF5", NAVY)}
+                {!u.active && chip("Desativado", "#FBEFEA", "#993D1D")}
+              </div>
+            </div>
+            {!self && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                <select disabled={busy} value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })} style={{ ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12.5 }}>
+                  <option value="staff">{ROLE_LABEL.staff}</option>
+                  <option value="admin">{ROLE_LABEL.admin}</option>
+                </select>
+                <button disabled={busy} onClick={() => patch(u.id, { active: !u.active })} style={{ background: "none", border: "1px solid #D9D4C6", borderRadius: 6, padding: "5px 12px", fontSize: 12.5, cursor: "pointer", color: u.active ? "#993D1D" : "#27500A" }}>
+                  {u.active ? "Desativar acesso" : "Reativar acesso"}
+                </button>
+                <button disabled={busy} onClick={() => { setPwFor(pwFor === u.id ? null : u.id); setNewPw(""); }} style={{ background: "none", border: "1px solid #D9D4C6", borderRadius: 6, padding: "5px 12px", fontSize: 12.5, cursor: "pointer", color: NAVY }}>
+                  Redefinir senha
+                </button>
+              </div>
+            )}
+            {pwFor === u.id && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <input style={{ ...inputStyle, maxWidth: 240 }} placeholder="Nova senha (mín. 8)" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="off" />
+                <button disabled={busy} onClick={() => savePw(u.id)} style={{ background: NAVY, color: "#EDE6D8", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 13, cursor: "pointer" }}>Salvar</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 function IntakeReviewTab({ onUseSubmission }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -4522,6 +4659,7 @@ export default function RSACApp() {
   const [expandedCaseClient, setExpandedCaseClient] = useState(null);
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
+  const roleRef = useRef(null);
   const [newsletters, setNewsletters] = useState([]);
   const [portalData, setPortalData] = useState(null);
   const [caseTypesCatalog, setCaseTypesCatalog] = useState([]);
@@ -4560,8 +4698,18 @@ export default function RSACApp() {
       setCaseTypesCatalog(catalog); setCaseTypesByCaseId(byCaseId);
       const { caseIdsByContract, typesByContract } = await fetchContractRelations();
       setContractCaseIds(caseIdsByContract); setContractTypesByContractId(typesByContract);
-      const { data: profile } = await supabase.from("profiles").select("role, full_name").eq("id", session.user.id).single();
+      let { data: profile, error: profErr } = await supabase.from("profiles").select("role, full_name, active").eq("id", session.user.id).single();
+      if (profErr) {
+        // coluna "active" ainda não existe (SQL de equipe não aplicado): segue sem checar
+        const fb = await supabase.from("profiles").select("role, full_name").eq("id", session.user.id).single();
+        profile = fb.data;
+      } else if (!profile || profile.active === false) {
+        await supabase.auth.signOut();
+        alert("Seu acesso está desativado ou não foi liberado. Fale com o administrador do escritório.");
+        return;
+      }
       const r = profile?.role || "staff";
+      roleRef.current = r;
       setRole(r);
       setCurrentUserName(profile?.full_name || session.user.email || "Você");
       if (r === "admin") {
@@ -4654,6 +4802,7 @@ export default function RSACApp() {
   }, []);
 
   const handleDeleteQuote = useCallback(async (id) => {
+    if (roleRef.current !== "admin") { alert("Apenas o administrador pode excluir registros."); return; }
     await deleteRow("quotes", id);
     setQuotes((prev) => prev.filter((q) => q.id !== id));
   }, []);
@@ -4719,6 +4868,7 @@ export default function RSACApp() {
   }, [googleToken, tasks]);
 
   const removeRow = useCallback(async (key, id) => {
+    if (roleRef.current !== "admin") { alert("Apenas o administrador pode excluir registros."); return; }
     setters[key]((prev) => prev.filter((r) => r.id !== id));
     await deleteRow(key, id);
   }, []);
@@ -4813,20 +4963,23 @@ export default function RSACApp() {
   const receitas = finance.filter((f) => f.type === "Receita").reduce((s, f) => s + Number(f.amount || 0), 0);
   const despesas = finance.filter((f) => f.type === "Despesa").reduce((s, f) => s + Number(f.amount || 0), 0);
 
+  const isAdmin = role === "admin";
   const NAV = [
     { id: "dashboard", label: "Painel", icon: LayoutDashboard },
     { id: "deadlines", label: "Controle de Prazos", icon: Clock },
     { id: "tasks", label: "Todas as tarefas", icon: CheckSquare },
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
-    { id: "finance", label: "Financeiro", icon: Wallet },
-    { id: "contracts", label: "Contratos", icon: FileText },
-    { id: "quotes", label: "Orçamentos", icon: Calculator },
+    ...(isAdmin ? [
+      { id: "finance", label: "Financeiro", icon: Wallet },
+      { id: "contracts", label: "Contratos", icon: FileText },
+      { id: "quotes", label: "Orçamentos", icon: Calculator },
+    ] : []),
   ];
   const SECONDARY_NAV = [
     { id: "clients", label: "Contatos", icon: Users },
     { id: "cases", label: "Todos os casos", icon: Briefcase },
     { id: "intake", label: "Cadastros pendentes", icon: CheckSquare },
-    ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }] : []),
+    ...(role === "admin" ? [{ id: "newsletter", label: "Newsletter", icon: Mail }, { id: "team", label: "Equipe", icon: UserCog }] : []),
   ];
   const activeCasesList = cases
     .filter((c) => c.status === "Ativo")
@@ -4950,7 +5103,7 @@ export default function RSACApp() {
                   onSyncAll={syncAllTasks} />
               </div>
             )}
-            {mobileTab === "finance" && (
+            {mobileTab === "finance" && isAdmin && (
               <div style={{ padding: "16px 18px 100px" }}>
                 <FinanceTab finance={finance} clients={clients} cases={cases}
                   onAdd={() => { setEditingFinance(null); setFinanceContext(null); setModal("finance"); }}
@@ -4959,7 +5112,7 @@ export default function RSACApp() {
                   onOpenCase={(id) => { setActiveCaseId(id); }} />
               </div>
             )}
-            {mobileTab === "contracts" && (
+            {mobileTab === "contracts" && isAdmin && (
               <div style={{ padding: "16px 18px 100px" }}>
                 <ContractsPage contracts={contracts} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
                   cases={cases} clients={clients} caseTypesCatalog={caseTypesCatalog}
@@ -4970,7 +5123,7 @@ export default function RSACApp() {
                   onOpenCase={(id) => { setActiveCaseId(id); }} />
               </div>
             )}
-            {mobileTab === "quotes" && (
+            {mobileTab === "quotes" && isAdmin && (
               <div style={{ padding: "16px 18px 100px" }}>
                 <QuotesPage quotes={quotes} clients={clients}
                   onSave={handleSaveQuote} onDelete={handleDeleteQuote} onSetStatus={handleSetQuoteStatus} />
@@ -5009,6 +5162,9 @@ export default function RSACApp() {
                 <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
               </div>
             )}
+            {mobileTab === "team" && isAdmin && (
+              <div style={{ padding: "16px 18px 100px" }}><TeamPage currentUserId={session.user?.id} /></div>
+            )}
             {mobileTab === "deadlines" && (
               <div style={{ padding: "16px 18px 100px" }}>
                 <DeadlinesTab tasks={tasks} cases={cases} clients={clients}
@@ -5018,7 +5174,7 @@ export default function RSACApp() {
                   onAdd={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }} />
               </div>
             )}
-            <MobileBottomNav active={["clients", "finance", "newsletter", "intake", "deadlines", "quotes"].includes(mobileTab) ? "more" : mobileTab}
+            <MobileBottomNav active={["clients", "finance", "newsletter", "intake", "deadlines", "quotes", "team"].includes(mobileTab) ? "more" : mobileTab}
               onNavigate={(id) => { if (id === "more") setMobileMoreOpen(true); else goToTab(id); }}
               onAdd={floatingAddAction || (() => {})}
               hasTodayAlertByTab={hasTodayAlertByTab} />
@@ -5440,7 +5596,7 @@ export default function RSACApp() {
             onSyncAll={syncAllTasks} />
         )}
 
-        {tab === "finance" && (
+        {tab === "finance" && isAdmin && (
           <FinanceTab finance={finance} clients={clients} cases={cases}
             onAdd={() => { setEditingFinance(null); setFinanceContext(null); setModal("finance"); }}
             onEdit={(f) => { setEditingFinance(f); setModal("finance"); }}
@@ -5448,7 +5604,7 @@ export default function RSACApp() {
             clientName={clientName} onOpenCase={(id) => openCase(id)} />
         )}
 
-        {tab === "contracts" && (
+        {tab === "contracts" && isAdmin && (
           <ContractsPage contracts={contracts} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
             cases={cases} clients={clients} caseTypesCatalog={caseTypesCatalog}
             onAdd={() => { setEditingContract(null); setModal("contract"); }}
@@ -5458,7 +5614,7 @@ export default function RSACApp() {
             onOpenCase={(id) => openCase(id)} />
         )}
 
-        {tab === "quotes" && (
+        {tab === "quotes" && isAdmin && (
           <QuotesPage quotes={quotes} clients={clients}
             onSave={handleSaveQuote} onDelete={handleDeleteQuote} onSetStatus={handleSetQuoteStatus} />
         )}
@@ -5466,6 +5622,8 @@ export default function RSACApp() {
         {tab === "intake" && (
           <IntakeReviewTab onUseSubmission={useSubmission} />
         )}
+
+        {tab === "team" && isAdmin && <TeamPage currentUserId={session.user?.id} />}
 
         {tab === "newsletter" && role === "admin" && (
           <NewsletterTab clients={clients} newsletters={newsletters} onSave={saveNewsletter} onDelete={deleteNewsletter} />
