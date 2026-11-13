@@ -151,18 +151,113 @@ async function pushEventToGoogle(accessToken, appt, silent) {
     if (!resp.ok) {
       const errBody = await resp.text();
       console.error("Falha ao enviar evento ao Google Agenda", resp.status, errBody);
-      if (!silent) alert(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). O compromisso foi salvo no app normalmente.`);
+      if (!silent) notifyError(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). Ele foi salvo no app normalmente.`);
       return null;
     }
     const created = await resp.json().catch(() => null);
     return created?.id || null;
   } catch (e) {
     console.error("Falha ao enviar evento ao Google Agenda", e);
-    if (!silent) alert("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). O compromisso foi salvo no app normalmente.");
+    if (!silent) notifyError("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). Ele foi salvo no app normalmente.");
     return null;
 
   }
 }
+
+// --- Avisos na tela (substituem as janelas de alerta do navegador) ---
+// notify("mensagem", { tone: "error" | "success" | "info" }) — funciona em qualquer tela, inclusive no login.
+const TOAST_TONES = {
+  info: { bg: "#12283f", color: "#f5efe4", border: "#12283f", icon: "i" },
+  success: { bg: "#e4efe6", color: "#1f4d33", border: "#b9d5c1", icon: "✓" },
+  error: { bg: "#fbe3dc", color: "#7a2e14", border: "#e9b9a8", icon: "!" },
+  confirm: { bg: "#fff", color: "#23201a", border: "#ddd6c8", icon: "?" },
+};
+function toastContainer() {
+  let el = document.getElementById("rsac-toasts");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "rsac-toasts";
+    el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+  }
+  const mobile = window.innerWidth < 900;
+  Object.assign(el.style, {
+    position: "fixed", zIndex: "1000", display: "flex", flexDirection: "column", gap: "8px", pointerEvents: "none",
+    right: mobile ? "12px" : "20px", left: mobile ? "12px" : "auto", bottom: mobile ? "92px" : "20px",
+    maxWidth: mobile ? "none" : "380px", fontFamily: "Arial, sans-serif",
+  });
+  return el;
+}
+function showToast(message, { tone = "info", duration, actions } = {}) {
+  if (typeof document === "undefined") return () => {};
+  const t = TOAST_TONES[tone] || TOAST_TONES.info;
+  const box = document.createElement("div");
+  box.setAttribute("role", tone === "error" || tone === "confirm" ? "alert" : "status");
+  Object.assign(box.style, {
+    pointerEvents: "auto", background: t.bg, color: t.color, border: `1px solid ${t.border}`, borderRadius: "8px",
+    padding: "12px 14px", fontSize: "13.5px", lineHeight: "1.45", boxShadow: "0 8px 24px rgba(18,40,63,0.18)",
+    display: "flex", gap: "10px", alignItems: "flex-start", opacity: "0", transform: "translateY(6px)",
+    transition: "opacity 160ms ease, transform 160ms ease",
+  });
+  const icon = document.createElement("span");
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = t.icon;
+  Object.assign(icon.style, { fontWeight: "700", flexShrink: "0", width: "16px", textAlign: "center" });
+  const body = document.createElement("div");
+  Object.assign(body.style, { flex: "1", minWidth: "0" });
+  const text = document.createElement("div");
+  text.textContent = message;
+  body.appendChild(text);
+  let closed = false;
+  const close = () => {
+    if (closed) return; closed = true;
+    box.style.opacity = "0"; box.style.transform = "translateY(6px)";
+    setTimeout(() => box.remove(), 180);
+  };
+  if (actions && actions.length) {
+    const row = document.createElement("div");
+    Object.assign(row.style, { display: "flex", gap: "8px", marginTop: "10px", justifyContent: "flex-end" });
+    actions.forEach((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = a.label;
+      Object.assign(b.style, {
+        fontFamily: "inherit", fontSize: "12.5px", fontWeight: "600", borderRadius: "6px", padding: "6px 12px", cursor: "pointer",
+        background: a.primary ? "#12283f" : "#fff", color: a.primary ? "#f5efe4" : "#12283f", border: "1px solid #ddd6c8",
+      });
+      b.onclick = () => { close(); a.onClick?.(); };
+      row.appendChild(b);
+    });
+    body.appendChild(row);
+  }
+  const x = document.createElement("button");
+  x.type = "button";
+  x.setAttribute("aria-label", "Fechar aviso");
+  x.textContent = "×";
+  Object.assign(x.style, { background: "none", border: "none", color: "inherit", fontSize: "18px", lineHeight: "1", cursor: "pointer", padding: "0 0 0 4px", opacity: "0.7" });
+  x.onclick = () => { close(); actions?.find((a) => a.onDismiss)?.onDismiss(); };
+  box.append(icon, body, x);
+  toastContainer().appendChild(box);
+  requestAnimationFrame(() => { box.style.opacity = "1"; box.style.transform = "translateY(0)"; });
+  const ms = duration === undefined ? (tone === "error" ? 7000 : 4500) : duration;
+  if (ms) setTimeout(close, ms);
+  return close;
+}
+const notify = (message, opts) => showToast(message, opts);
+const notifyError = (message) => showToast(message, { tone: "error" });
+// Confirmação na própria tela (substitui window.confirm). Resolve true/false.
+function confirmToast(message, confirmLabel = "Confirmar") {
+  return new Promise((resolve) => {
+    showToast(message, {
+      tone: "confirm", duration: 0,
+      actions: [
+        { label: "Cancelar", onClick: () => resolve(false), onDismiss: () => resolve(false) },
+        { label: confirmLabel, primary: true, onClick: () => resolve(true) },
+      ],
+    });
+  });
+}
+const SAVE_ERROR_MSG = "Não foi possível salvar. Verifique a conexão e tente novamente.";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => {
@@ -304,31 +399,33 @@ function toPayload(key, row) {
 const isMissingReminderColumn = (error) => !!error && /reminder|google_event_id/i.test(`${error.message || ""} ${error.details || ""}`);
 const withoutReminder = (payload) => { const { reminder, google_event_id, ...rest } = payload; return rest; };
 
-async function insertRow(key, row) {
+async function insertRow(key, row, { quiet = false } = {}) {
   let { data, error } = await supabase.from(TABLE_BY_KEY[key]).insert([toPayload(key, row)]).select();
   if (key === "tasks" && isMissingReminderColumn(error)) {
     ({ data, error } = await supabase.from(TABLE_BY_KEY[key]).insert([withoutReminder(toPayload(key, row))]).select());
   }
-  if (error) { console.error(error); return null; }
+  if (error) { console.error(error); if (!quiet) notifyError(SAVE_ERROR_MSG); return null; }
   return MAPPER_BY_KEY[key](data[0]);
 }
 
 async function deleteRow(key, id) {
   const { error } = await supabase.from(TABLE_BY_KEY[key]).delete().eq("id", id);
-  if (error) console.error(error);
+  if (error) { console.error(error); return false; }
+  return true;
 }
 
-async function updateRow(key, id, patch) {
+async function updateRow(key, id, patch, { quiet = false } = {}) {
   const { error } = await supabase.from(TABLE_BY_KEY[key]).update(patch).eq("id", id);
-  if (error) console.error(error);
+  if (error) { console.error(error); if (!quiet) notifyError(SAVE_ERROR_MSG); return false; }
+  return true;
 }
 
-async function editRow(key, id, row) {
+async function editRow(key, id, row, { quiet = false } = {}) {
   let { data, error } = await supabase.from(TABLE_BY_KEY[key]).update(toPayload(key, row)).eq("id", id).select();
   if (key === "tasks" && isMissingReminderColumn(error)) {
     ({ data, error } = await supabase.from(TABLE_BY_KEY[key]).update(withoutReminder(toPayload(key, row))).eq("id", id).select());
   }
-  if (error) { console.error(error); return null; }
+  if (error) { console.error(error); if (!quiet) notifyError(SAVE_ERROR_MSG); return null; }
   return MAPPER_BY_KEY[key](data[0]);
 }
 
@@ -354,18 +451,18 @@ async function fetchCaseTypesData() {
 async function createCaseType(name, existingCount) {
   const palette = CASE_TYPE_PALETTE[existingCount % CASE_TYPE_PALETTE.length];
   const { data, error } = await supabase.from("case_types").insert([{ name, bg_color: palette.bg, border_color: palette.border }]).select();
-  if (error) { console.error(error); return null; }
+  if (error) { console.error(error); notifyError("Não foi possível criar o tipo de consultoria."); return null; }
   return toCaseType(data[0]);
 }
 
 async function linkCaseType(caseId, typeId) {
   const { error } = await supabase.from("case_case_types").insert([{ case_id: caseId, case_type_id: typeId }]);
-  if (error) console.error(error);
+  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
 }
 
 async function unlinkCaseType(caseId, typeId) {
   const { error } = await supabase.from("case_case_types").delete().eq("case_id", caseId).eq("case_type_id", typeId);
-  if (error) console.error(error);
+  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
 }
 
 // --- Contratos: relações (casos vinculados + tipos), status derivado e vigência ---
@@ -388,19 +485,19 @@ async function fetchContractRelations() {
 
 async function linkContractCase(contractId, caseId) {
   const { error } = await supabase.from("contract_cases").insert([{ contract_id: contractId, case_id: caseId }]);
-  if (error) console.error(error);
+  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
 }
 async function unlinkContractCase(contractId, caseId) {
   const { error } = await supabase.from("contract_cases").delete().eq("contract_id", contractId).eq("case_id", caseId);
-  if (error) console.error(error);
+  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
 }
 async function linkContractType(contractId, typeId) {
   const { error } = await supabase.from("contract_types").insert([{ contract_id: contractId, case_type_id: typeId }]);
-  if (error) console.error(error);
+  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
 }
 async function unlinkContractType(contractId, typeId) {
   const { error } = await supabase.from("contract_types").delete().eq("contract_id", contractId).eq("case_type_id", typeId);
-  if (error) console.error(error);
+  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
 }
 
 function deriveContractStatus(contract) {
@@ -4286,7 +4383,7 @@ ${q.notes ? `<div class="avoid"><h2>Observações</h2><div>${esc(q.notes)}</div>
 
 function printQuote(q, recipient) {
   const w = window.open("", "_blank");
-  if (!w) { alert("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente."); return; }
+  if (!w) { notifyError("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente."); return; }
   w.document.open();
   w.document.write(quotePrintHTML(q, recipient));
   w.document.close();
@@ -4352,9 +4449,9 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
   }));
 
   const submit = async () => {
-    if (!draft.title.trim()) { alert("Informe o objeto da proposta (ex.: Ação de repetição de indébito)."); return; }
-    if (!draft.clientId && !draft.prospectName.trim()) { alert("Selecione um cliente ou informe o nome do destinatário."); return; }
-    if (draft.items.length === 0) { alert("Adicione ao menos um serviço."); return; }
+    if (!draft.title.trim()) { notifyError("Informe o objeto da proposta (ex.: Ação de repetição de indébito)."); return; }
+    if (!draft.clientId && !draft.prospectName.trim()) { notifyError("Selecione um cliente ou informe o nome do destinatário."); return; }
+    if (draft.items.length === 0) { notifyError("Adicione ao menos um serviço."); return; }
     setSaving(true);
     await onSave({ ...draft, clientId: draft.clientId || null }, draft.id);
     setSaving(false);
@@ -4364,7 +4461,8 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
   const doCopy = async () => {
     const ok = await copyText(quoteToText(draft, recipientOf(draft).name));
     setCopied(ok);
-    if (!ok) alert("Não foi possível copiar automaticamente. Tente novamente.");
+    if (!ok) notifyError("Não foi possível copiar automaticamente. Tente novamente.");
+    else notify("Copiado.", { tone: "success", duration: 2500 });
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -4572,7 +4670,7 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
                 <select value={q.status} onChange={(e) => onSetStatus(q.id, e.target.value)} style={{ border: "none", borderRadius: 20, padding: "5px 10px", fontSize: 12, fontWeight: 600, background: st.bg, color: st.color, cursor: "pointer" }}>
                   {Object.keys(QUOTE_STATUS).map((s) => <option key={s} value={s}>{QUOTE_STATUS[s].label}</option>)}
                 </select>
-                <span onClick={() => { if (window.confirm(`Excluir o orçamento ${q.number}?`)) onDelete(q.id); }} style={{ fontSize: 11.5, color: "#C0997B", cursor: "pointer" }}>Excluir</span>
+                <button type="button" onClick={async () => { if (await confirmToast(`Excluir o orçamento ${q.number}? Essa ação não pode ser desfeita.`, "Excluir")) onDelete(q.id); }} style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", fontSize: 11.5, color: "#a5532f", cursor: "pointer" }}>Excluir</button>
               </div>
             </div>
           );
@@ -5171,7 +5269,7 @@ export default function RSACApp() {
         profile = fb.data;
       } else if (!profile || profile.active === false) {
         await supabase.auth.signOut();
-        alert("Seu acesso está desativado ou não foi liberado. Fale com o administrador do escritório.");
+        notifyError("Seu acesso está desativado ou não foi liberado. Fale com o administrador do escritório.");
         return;
       }
       const r = profile?.role || "staff";
@@ -5240,8 +5338,10 @@ export default function RSACApp() {
 
   const handleToggleSuspendContract = useCallback(async (contract) => {
     const nextSuspended = contract.suspendedSince ? null : todayISO();
-    await updateRow("contracts", contract.id, { suspended_since: nextSuspended });
+    const ok = await updateRow("contracts", contract.id, { suspended_since: nextSuspended });
+    if (!ok) return;
     setContracts((prev) => prev.map((c) => (c.id === contract.id ? { ...c, suspendedSince: nextSuspended } : c)));
+    notify(nextSuspended ? "Contrato suspenso — cobrança pausada." : "Contrato reativado.", { tone: "success" });
   }, []);
 
   const handleDeleteContract = useCallback(async (id) => {
@@ -5252,13 +5352,13 @@ export default function RSACApp() {
 
   const handleSaveQuote = useCallback(async (values, id) => {
     if (id) {
-      const saved = await editRow("quotes", id, values);
-      if (saved) setQuotes((prev) => prev.map((q) => (q.id === id ? saved : q)));
-      else alert("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
+      const saved = await editRow("quotes", id, values, { quiet: true });
+      if (saved) { setQuotes((prev) => prev.map((q) => (q.id === id ? saved : q))); notify("Orçamento salvo.", { tone: "success" }); }
+      else notifyError("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
     } else {
-      const saved = await insertRow("quotes", values);
-      if (saved) setQuotes((prev) => [saved, ...prev]);
-      else alert("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
+      const saved = await insertRow("quotes", values, { quiet: true });
+      if (saved) { setQuotes((prev) => [saved, ...prev]); notify("Orçamento salvo.", { tone: "success" }); }
+      else notifyError("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
     }
   }, []);
 
@@ -5268,9 +5368,10 @@ export default function RSACApp() {
   }, []);
 
   const handleDeleteQuote = useCallback(async (id) => {
-    if (roleRef.current !== "admin") { alert("Apenas o administrador pode excluir registros."); return; }
-    await deleteRow("quotes", id);
-    setQuotes((prev) => prev.filter((q) => q.id !== id));
+    if (roleRef.current !== "admin") { notifyError("Apenas o administrador pode excluir registros."); return; }
+    const ok = await deleteRow("quotes", id);
+    if (ok) setQuotes((prev) => prev.filter((q) => q.id !== id));
+    else notifyError("Não foi possível excluir o orçamento.");
   }, []);
 
   const handleAddNote = useCallback(async (caseId, values) => {
@@ -5281,7 +5382,7 @@ export default function RSACApp() {
   const handleEditNoteContent = useCallback(async (noteId, patch) => {
     const current = notes.find((n) => n.id === noteId);
     if (!current) return;
-    if (current.authorId && current.authorId !== session?.user?.id) { alert("Só o autor pode editar esta anotação."); return; }
+    if (current.authorId && current.authorId !== session?.user?.id) { notifyError("Só o autor pode editar esta anotação."); return; }
     const merged = { ...current, ...patch, updatedAt: new Date().toISOString() };
     const saved = await editRow("notes", noteId, merged);
     if (saved) setNotes((prev) => prev.map((n) => (n.id === noteId ? saved : n)));
@@ -5289,15 +5390,15 @@ export default function RSACApp() {
 
   const deleteNote = useCallback((noteId) => {
     const n = notes.find((x) => x.id === noteId);
-    if (n?.authorId && n.authorId !== session?.user?.id) { alert("Só o autor pode apagar esta anotação."); return; }
+    if (n?.authorId && n.authorId !== session?.user?.id) { notifyError("Só o autor pode apagar esta anotação."); return; }
     removeRow("notes", noteId);
   }, [notes, session]);
 
   const handleTogglePinNote = useCallback(async (note) => {
     const otherPinned = notes.find((n) => n.caseId === note.caseId && n.pinned && n.id !== note.id);
     const nextPinned = !note.pinned;
-    if (otherPinned) await updateRow("notes", otherPinned.id, { pinned: false });
-    await updateRow("notes", note.id, { pinned: nextPinned });
+    if (otherPinned && !(await updateRow("notes", otherPinned.id, { pinned: false }))) return;
+    if (!(await updateRow("notes", note.id, { pinned: nextPinned }))) return;
     setNotes((prev) => prev.map((n) => {
       if (n.id === note.id) return { ...n, pinned: nextPinned };
       if (otherPinned && n.id === otherPinned.id) return { ...n, pinned: false };
@@ -5351,7 +5452,7 @@ export default function RSACApp() {
     const persisted = {};
     if ("googleSynced" in patch) persisted.google_synced = patch.googleSynced;
     if ("googleEventId" in patch) persisted.google_event_id = patch.googleEventId;
-    await updateRow("tasks", task.id, persisted);
+    await updateRow("tasks", task.id, persisted, { quiet: true });
     return next;
   }, []);
 
@@ -5370,19 +5471,24 @@ export default function RSACApp() {
       const result = await syncTaskWithGoogle(t);
       if (result.googleSynced) okCount++;
     }
-    alert(`Sincronização concluída: ${okCount} de ${pending.length} compromisso(s) enviados ao Google Agenda.`);
+    notify(`Sincronização concluída: ${okCount} de ${pending.length} compromisso(s) enviados ao Google Agenda.`, { tone: okCount === pending.length ? "success" : "error" });
     return { total: pending.length, ok: okCount };
   }, [googleToken, tasks, syncTaskWithGoogle]);
 
   const removeRow = useCallback(async (key, id) => {
-    if (roleRef.current !== "admin") { alert("Apenas o administrador pode excluir registros."); return; }
+    if (roleRef.current !== "admin") { notifyError("Apenas o administrador pode excluir registros."); return; }
+    let removed = null;
     if (key === "tasks") {
       // Excluir a tarefa também tira o compromisso do Google Agenda (quando conectado)
       const t = tasksRef.current.find((x) => x.id === id);
       if (t?.googleEventId && googleTokenRef.current) await deleteGoogleEvent(googleTokenRef.current, t.googleEventId);
     }
-    setters[key]((prev) => prev.filter((r) => r.id !== id));
-    await deleteRow(key, id);
+    setters[key]((prev) => { removed = prev.find((r) => r.id === id) || null; return prev.filter((r) => r.id !== id); });
+    const ok = await deleteRow(key, id);
+    if (!ok) {
+      if (removed) setters[key]((prev) => (prev.some((r) => r.id === id) ? prev : [...prev, removed]));
+      notifyError("Não foi possível excluir. O registro foi mantido.");
+    }
   }, []);
 
   const editClientRow = useCallback(async (id, values) => {
@@ -5414,13 +5520,13 @@ export default function RSACApp() {
   // Arrastar na semana do caso: muda a data da tarefa (atualização otimista; reverte se falhar)
   const moveTaskToDate = useCallback(async (task, newDate) => {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, dueDate: newDate } : t)));
-    const updated = await editRow("tasks", task.id, { ...task, dueDate: newDate });
+    const updated = await editRow("tasks", task.id, { ...task, dueDate: newDate }, { quiet: true });
     if (updated) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
       await syncTaskWithGoogle(updated);
     } else {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
-      alert("Não foi possível mudar a data da tarefa. Tente novamente.");
+      notifyError("Não foi possível mudar a data da tarefa. Ela voltou para o dia original.");
     }
   }, [syncTaskWithGoogle]);
 
@@ -5467,7 +5573,13 @@ export default function RSACApp() {
     const newDone = !t.done;
     const completedAt = newDone ? todayISO() : null;
     setTasks((prev) => prev.map((x) => x.id === id ? { ...x, done: newDone, completedAt } : x));
-    await updateRow("tasks", id, { done: newDone, completed_at: completedAt });
+    const ok = await updateRow("tasks", id, { done: newDone, completed_at: completedAt }, { quiet: true });
+    if (!ok) {
+      // Atualização otimista desfeita: volta o estado anterior e avisa
+      setTasks((prev) => prev.map((x) => x.id === id ? { ...x, done: t.done, completedAt: t.completedAt } : x));
+      notifyError(newDone ? "Não foi possível concluir a tarefa. Ela voltou para abertas." : "Não foi possível reabrir a tarefa.");
+      return;
+    }
     // Concluir tira o compromisso futuro do Google; reabrir devolve
     if (t.time && t.dueDate) await syncTaskWithGoogle({ ...t, done: newDone, completedAt });
   }, [tasks, syncTaskWithGoogle]);
