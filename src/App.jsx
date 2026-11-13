@@ -83,41 +83,83 @@ async function generateProcuracao(client, extra) {
   a.remove();
   URL.revokeObjectURL(url);
 }
+// Corpo do evento no formato da API do Google Agenda (compromisso de 1h, ou dia inteiro sem hora)
+function googleEventBody(appt) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
+  let start, end;
+  if (appt.time) {
+    start = { dateTime: `${appt.date}T${appt.time}:00`, timeZone: tz };
+    const [h, m] = appt.time.split(":").map(Number);
+    const endDate = new Date(appt.date + "T00:00:00");
+    endDate.setHours(h, m + 60);
+    const endDay = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+    const endTime = `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`;
+    end = { dateTime: `${endDay}T${endTime}:00`, timeZone: tz };
+  } else {
+    const next = new Date(appt.date + "T00:00:00");
+    next.setDate(next.getDate() + 1);
+    start = { date: appt.date };
+    end = { date: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}` };
+  }
+  return {
+    summary: appt.title, location: appt.location || undefined, start, end,
+    reminders: appt.reminder === "none" ? { useDefault: false, overrides: [] }
+      : { useDefault: false, overrides: [{ method: "popup", minutes: appt.reminder === "1h" ? 60 : 1440 }] },
+  };
+}
+
+// Atualiza um evento já enviado. Retorna "ok", "gone" (apagado no Google) ou "error".
+async function updateGoogleEvent(accessToken, eventId, appt) {
+  try {
+    const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(googleEventBody(appt)),
+    });
+    if (resp.ok) return "ok";
+    if (resp.status === 404 || resp.status === 410) return "gone";
+    console.error("Falha ao atualizar evento no Google Agenda", resp.status, await resp.text());
+    return "error";
+  } catch (e) {
+    console.error("Falha ao atualizar evento no Google Agenda", e);
+    return "error";
+  }
+}
+
+async function deleteGoogleEvent(accessToken, eventId) {
+  try {
+    const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (resp.ok || resp.status === 404 || resp.status === 410) return true;
+    console.error("Falha ao remover evento do Google Agenda", resp.status, await resp.text());
+    return false;
+  } catch (e) {
+    console.error("Falha ao remover evento do Google Agenda", e);
+    return false;
+  }
+}
+
+// Envia um novo evento. Retorna o id do evento criado (ou null em caso de falha).
 async function pushEventToGoogle(accessToken, appt, silent) {
   try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
-    let start, end;
-    if (appt.time) {
-      start = { dateTime: `${appt.date}T${appt.time}:00`, timeZone: tz };
-      const [h, m] = appt.time.split(":").map(Number);
-      const endDate = new Date(appt.date + "T00:00:00");
-      endDate.setHours(h, m + 60);
-      const endTime = `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`;
-      end = { dateTime: `${appt.date}T${endTime}:00`, timeZone: tz };
-    } else {
-      start = { date: appt.date };
-      end = { date: appt.date };
-    }
     const resp = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        summary: appt.title, location: appt.location || undefined, start, end,
-        reminders: appt.reminder === "none" ? { useDefault: false, overrides: [] }
-          : { useDefault: false, overrides: [{ method: "popup", minutes: appt.reminder === "1h" ? 60 : 1440 }] },
-      }),
+      body: JSON.stringify(googleEventBody(appt)),
     });
     if (!resp.ok) {
       const errBody = await resp.text();
       console.error("Falha ao enviar evento ao Google Agenda", resp.status, errBody);
       if (!silent) alert(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). O compromisso foi salvo no app normalmente.`);
-      return false;
+      return null;
     }
-    return true;
+    const created = await resp.json().catch(() => null);
+    return created?.id || null;
   } catch (e) {
     console.error("Falha ao enviar evento ao Google Agenda", e);
     if (!silent) alert("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). O compromisso foi salvo no app normalmente.");
-    return false;
+    return null;
 
   }
 }
@@ -131,6 +173,7 @@ const fmtDate = (iso) => {
 const fmtBRL = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtDateTime = (iso) => {
   if (!iso) return "—";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return fmtDate(iso);
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return fmtDate(iso);
   const datePart = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
@@ -158,7 +201,7 @@ const CASE_TYPE_PALETTE = [
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code, nacionalidade: r.nacionalidade, estadoCivil: r.estado_civil, profissao: r.profissao, orgaoExpedidorRg: r.orgao_expedidor_rg, representanteLegal: r.representante_legal });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado, honorariosSucumbencia: r.honorarios_sucumbencia });
-const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id, time: r.time, location: r.location, googleSynced: r.google_synced || false, reminder: r.reminder || "1d" });
+const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id, time: r.time, location: r.location, googleSynced: r.google_synced || false, reminder: r.reminder || "1d", googleEventId: r.google_event_id || null });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group, settledAt: r.settled_at });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes, relatedProcess: r.related_process });
@@ -227,7 +270,7 @@ async function loadAll() {
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null, nacionalidade: row.nacionalidade || null, estado_civil: row.estadoCivil || null, profissao: row.profissao || null, orgao_expedidor_rg: row.orgaoExpedidorRg || null, representante_legal: row.representanteLegal || null };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null, honorarios_sucumbencia: row.honorariosSucumbencia || null };
-  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null, time: row.time || null, location: row.location || null, google_synced: row.googleSynced || false, reminder: row.reminder || "1d" };
+  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null, time: row.time || null, location: row.location || null, google_synced: row.googleSynced || false, reminder: row.reminder || "1d", google_event_id: row.googleEventId || null };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null, related_process: row.relatedProcess || null };
@@ -256,9 +299,10 @@ function toPayload(key, row) {
   return row;
 }
 
-// Se a coluna "reminder" ainda não existir no Supabase, salva a tarefa sem ela (evita quebrar o cadastro antes da migração).
-const isMissingReminderColumn = (error) => !!error && /reminder/i.test(`${error.message || ""} ${error.details || ""}`);
-const withoutReminder = (payload) => { const { reminder, ...rest } = payload; return rest; };
+// Colunas opcionais de tarefas (reminder, google_event_id): se ainda não existirem no Supabase,
+// salva a tarefa sem elas — evita quebrar o cadastro antes de rodar a migração.
+const isMissingReminderColumn = (error) => !!error && /reminder|google_event_id/i.test(`${error.message || ""} ${error.details || ""}`);
+const withoutReminder = (payload) => { const { reminder, google_event_id, ...rest } = payload; return rest; };
 
 async function insertRow(key, row) {
   let { data, error } = await supabase.from(TABLE_BY_KEY[key]).insert([toPayload(key, row)]).select();
@@ -668,6 +712,134 @@ const NOTE_TYPES = [
 ];
 const noteTypeMeta = (id) => NOTE_TYPES.find((t) => t.id === id) || NOTE_TYPES[0];
 
+// --- Navegação: última aba visitada de cada caso (por sessão do navegador) ---
+const CONSULTORIA_TAB_IDS = ["visao-geral", "contrato", "tarefas", "anotacoes", "documentos", "financeiro", "contatos"];
+const JUDICIAL_TAB_IDS = ["tarefas", "prazos", "documentos", "financeiro", "contatos"];
+function readCaseTab(caseId, isConsultoria) {
+  const allowed = isConsultoria ? CONSULTORIA_TAB_IDS : JUDICIAL_TAB_IDS;
+  try {
+    const saved = sessionStorage.getItem(`rsac:caseTab:${caseId}`);
+    if (saved && allowed.includes(saved)) return saved;
+  } catch (e) { /* armazenamento indisponível: usa a aba padrão */ }
+  return isConsultoria ? "visao-geral" : "tarefas";
+}
+function saveCaseTab(caseId, tabId) {
+  try { sessionStorage.setItem(`rsac:caseTab:${caseId}`, tabId); } catch (e) { /* ignora */ }
+}
+
+// Abas acessíveis: setas ←/→, Home e End trocam de aba e movem o foco
+function handleTabKeyDown(e, ids, current, select) {
+  const i = ids.indexOf(current);
+  let next = null;
+  if (e.key === "ArrowRight") next = ids[(i + 1) % ids.length];
+  else if (e.key === "ArrowLeft") next = ids[(i - 1 + ids.length) % ids.length];
+  else if (e.key === "Home") next = ids[0];
+  else if (e.key === "End") next = ids[ids.length - 1];
+  if (!next) return;
+  e.preventDefault();
+  select(next);
+  const list = e.currentTarget.closest('[role="tablist"]');
+  requestAnimationFrame(() => list?.querySelector(`[data-tab-id="${next}"]`)?.focus());
+}
+
+// Usuário logado (para regras de autoria das anotações)
+const CurrentUserContext = React.createContext({ id: null });
+
+// "YYYY-MM-DDTHH:mm" no fuso local, para <input type="datetime-local">
+function toLocalInputValue(iso) {
+  if (!iso) iso = new Date().toISOString();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return `${iso}T00:00`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+const localInputToISO = (v) => (v ? new Date(v).toISOString() : new Date().toISOString());
+
+// --- Formatação simples das anotações: **negrito**, *itálico*, listas (- item / 1. item) e links ---
+const NOTE_INLINE_RE = /(\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\))|(\*\*([^*\n]+)\*\*)|(\*([^*\n]+)\*)|(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g;
+function renderNoteInline(text, keyBase) {
+  const out = [];
+  let last = 0; let m; let i = 0;
+  NOTE_INLINE_RE.lastIndex = 0;
+  while ((m = NOTE_INLINE_RE.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const k = `${keyBase}-${i++}`;
+    const linkStyle = { color: NAVY, textDecoration: "underline" };
+    if (m[1]) out.push(<a key={k} href={m[3]} target="_blank" rel="noreferrer" style={linkStyle}>{m[2]}</a>);
+    else if (m[4]) out.push(<strong key={k}>{m[5]}</strong>);
+    else if (m[6]) out.push(<em key={k}>{m[7]}</em>);
+    else if (m[8]) out.push(<a key={k} href={m[8]} target="_blank" rel="noreferrer" style={linkStyle}>{m[8]}</a>);
+    last = NOTE_INLINE_RE.lastIndex;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+function NoteBody({ text, style }) {
+  const lines = (text || "").split("\n");
+  const blocks = [];
+  let list = null;
+  lines.forEach((line, idx) => {
+    const ul = line.match(/^\s*[-•]\s+(.*)$/);
+    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    const kind = ul ? "ul" : ol ? "ol" : null;
+    if (kind) {
+      if (!list || list.kind !== kind) { list = { kind, items: [] }; blocks.push(list); }
+      list.items.push((ul || ol)[1]);
+      return;
+    }
+    list = null;
+    blocks.push({ kind: "p", text: line });
+  });
+  return (
+    <div style={style}>
+      {blocks.map((b, bi) => {
+        if (b.kind === "p") return <div key={bi} style={{ minHeight: b.text ? undefined : "0.8em" }}>{renderNoteInline(b.text, bi)}</div>;
+        const Tag = b.kind;
+        return <Tag key={bi} style={{ margin: "2px 0", paddingLeft: 22 }}>{b.items.map((it, ii) => <li key={ii}>{renderNoteInline(it, `${bi}-${ii}`)}</li>)}</Tag>;
+      })}
+    </div>
+  );
+}
+
+// Barra de formatação para o textarea das anotações
+function NoteFormatToolbar({ textareaRef, value, onChange }) {
+  const apply = (kind) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? value.length; const end = el.selectionEnd ?? value.length;
+    const sel = value.slice(start, end);
+    let insert; let selStart; let selEnd;
+    if (kind === "bold" || kind === "italic") {
+      const mark = kind === "bold" ? "**" : "*";
+      const inner = sel || (kind === "bold" ? "negrito" : "itálico");
+      insert = `${mark}${inner}${mark}`; selStart = start + mark.length; selEnd = selStart + inner.length;
+    } else if (kind === "list") {
+      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+      const block = value.slice(lineStart, end) || "";
+      const listed = block.split("\n").map((l) => (/^\s*[-•]\s+/.test(l) ? l : `- ${l}`)).join("\n");
+      const next = value.slice(0, lineStart) + listed + value.slice(end);
+      onChange(next);
+      requestAnimationFrame(() => { el.focus(); el.setSelectionRange(lineStart + listed.length, lineStart + listed.length); });
+      return;
+    } else {
+      const label = sel || "texto do link";
+      insert = `[${label}](https://)`; selStart = start + label.length + 3; selEnd = selStart + 8;
+    }
+    onChange(value.slice(0, start) + insert + value.slice(end));
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(selStart, selEnd); });
+  };
+  const btn = { background: "#fff", border: "1px solid #ddd6c8", borderRadius: 5, padding: "3px 9px", fontSize: 12.5, cursor: "pointer", color: "#4a4438", fontFamily: "inherit" };
+  return (
+    <div style={{ display: "flex", gap: 6 }} aria-label="Formatação">
+      <button type="button" onClick={() => apply("bold")} style={{ ...btn, fontWeight: 700 }} aria-label="Negrito">B</button>
+      <button type="button" onClick={() => apply("italic")} style={{ ...btn, fontStyle: "italic" }} aria-label="Itálico">I</button>
+      <button type="button" onClick={() => apply("list")} style={btn} aria-label="Lista">• Lista</button>
+      <button type="button" onClick={() => apply("link")} style={btn} aria-label="Link">Link</button>
+    </div>
+  );
+}
+
 function ParticipantPicker({ selectedIds, pool, onToggle }) {
   const [open, setOpen] = useState(false);
   const selected = pool.filter((p) => (selectedIds || []).includes(p.id));
@@ -702,31 +874,41 @@ function NoteComposer({ onAdd, participantsPool }) {
   const [type, setType] = useState("reuniao");
   const [participantIds, setParticipantIds] = useState([]);
   const [expanded, setExpanded] = useState(false);
+  const [occurredLocal, setOccurredLocal] = useState(() => toLocalInputValue());
+  const textareaRef = useRef(null);
 
   const submit = () => {
     if (!content.trim()) return;
-    onAdd({ content: content.trim(), type, participantIds, date: todayISO() });
-    setContent(""); setParticipantIds([]); setExpanded(false);
+    onAdd({ content: content.trim(), type, participantIds, date: (occurredLocal || toLocalInputValue()).slice(0, 10), occurredAt: localInputToISO(occurredLocal) });
+    setContent(""); setParticipantIds([]); setExpanded(false); setOccurredLocal(toLocalInputValue());
   };
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-      <textarea
+      <textarea ref={textareaRef} aria-label="Nova anotação"
         value={content} onChange={(e) => setContent(e.target.value)} onFocus={() => setExpanded(true)}
         placeholder="Escrever uma anotação…"
-        style={{ border: "none", outline: "none", resize: "none", fontSize: 15, fontFamily: "inherit", minHeight: expanded ? 70 : 24, color: "#23201a" }}
+        style={{ border: "none", outline: "none", resize: "vertical", fontSize: 15, fontFamily: "inherit", minHeight: expanded ? 90 : 24, color: "#23201a" }}
       />
       {expanded && (
-        <ParticipantPicker selectedIds={participantIds} pool={participantsPool} onToggle={(id) => setParticipantIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])} />
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <NoteFormatToolbar textareaRef={textareaRef} value={content} onChange={setContent} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#6b6455" }}>
+            Data e hora do fato
+            <input type="datetime-local" value={occurredLocal} onChange={(e) => setOccurredLocal(e.target.value)}
+              style={{ border: "1px solid #ddd6c8", borderRadius: 6, padding: "4px 8px", fontSize: 12.5, fontFamily: "inherit", color: "#23201a" }} />
+          </label>
+          <ParticipantPicker selectedIds={participantIds} pool={participantsPool} onToggle={(id) => setParticipantIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])} />
+        </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {NOTE_TYPES.map((t) => (
-            <span key={t.id} onClick={() => setType(t.id)} style={{
-              fontSize: 12.5, padding: "6px 12px", borderRadius: 20, cursor: "pointer",
+            <button key={t.id} type="button" aria-pressed={type === t.id} onClick={() => setType(t.id)} style={{
+              fontSize: 12.5, padding: "6px 12px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit",
               background: type === t.id ? t.bg : "#fff", color: type === t.id ? "#12283f" : "#6b6455",
-              fontWeight: type === t.id ? 600 : 400, border: type === t.id ? "none" : "1px solid #ddd6c8",
-            }}>{t.label}</span>
+              fontWeight: type === t.id ? 600 : 400, border: type === t.id ? "1px solid transparent" : "1px solid #ddd6c8",
+            }}>{t.label}</button>
           ))}
         </div>
         <button onClick={submit} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>Salvar</button>
@@ -743,7 +925,7 @@ function PinnedNoteCard({ note, onUnpin }) {
         <span onClick={onUnpin} style={{ fontSize: 12, color: "#8a6d3b", cursor: "pointer" }}>Desfixar</span>
       </div>
       <div style={{ fontSize: 12, color: "#857d6c" }}>atualizada em {fmtDateTime(note.updatedAt || note.occurredAt || note.date)} · {note.authorName || "—"}</div>
-      <div style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a", whiteSpace: "pre-wrap" }}>{note.content}</div>
+      <NoteBody text={note.content} style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a" }} />
     </div>
   );
 }
@@ -751,7 +933,12 @@ function PinnedNoteCard({ note, onUnpin }) {
 function NoteCard({ note, participantsPool, onEdit, onDelete, onTogglePin, onCreateTask, derivedTaskCount }) {
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(note.content);
+  const [occurredLocal, setOccurredLocal] = useState(() => toLocalInputValue(note.occurredAt || note.date));
   const [selMenu, setSelMenu] = useState(null);
+  const editRef = useRef(null);
+  const currentUser = React.useContext(CurrentUserContext);
+  // Só o autor edita ou apaga a anotação (anotações antigas, sem autor registrado, continuam livres)
+  const isAuthor = !note.authorId || note.authorId === currentUser.id;
   const meta = noteTypeMeta(note.type);
   const participants = participantsPool.filter((p) => (note.participantIds || []).includes(p.id));
   const edited = note.updatedAt && note.createdAt && note.updatedAt > note.createdAt;
@@ -772,23 +959,40 @@ function NoteCard({ note, participantsPool, onEdit, onDelete, onTogglePin, onCre
             {fmtDateTime(note.occurredAt || note.date)} · {note.authorName || "—"}{edited ? ` · editada em ${fmtDateTime(note.updatedAt)}` : ""}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 12, color: "#b8b0a0", flexShrink: 0 }}>
-          <span onClick={() => onTogglePin(note)} title={note.pinned ? "Desfixar" : "Fixar"} style={{ cursor: "pointer" }}>📌</span>
-          <span onClick={() => setEditing((v) => !v)} title="Editar" style={{ cursor: "pointer" }}>✎</span>
-          <span onClick={() => onDelete(note.id)} title="Excluir" style={{ cursor: "pointer" }}><Trash2 size={14} /></span>
+        <div style={{ display: "flex", gap: 4, color: "#b8b0a0", flexShrink: 0 }}>
+          {[
+            { show: true, label: note.pinned ? "Desfixar" : "Fixar", icon: "📌", onClick: () => onTogglePin(note) },
+            { show: isAuthor, label: "Editar", icon: "✎", onClick: () => { setContent(note.content); setOccurredLocal(toLocalInputValue(note.occurredAt || note.date)); setEditing((v) => !v); } },
+            { show: isAuthor, label: "Excluir", icon: <Trash2 size={14} />, onClick: () => onDelete(note.id) },
+          ].filter((a) => a.show).map((a) => (
+            <button key={a.label} type="button" onClick={a.onClick} title={a.label} aria-label={a.label}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#8f877a", padding: "2px 5px", fontSize: 14, lineHeight: 1 }}>{a.icon}</button>
+          ))}
         </div>
       </div>
 
       {editing ? (
         <>
-          <textarea value={content} onChange={(e) => setContent(e.target.value)} style={{ fontSize: 15, lineHeight: 1.6, border: "1px solid #ddd6c8", borderRadius: 6, padding: "8px 10px", minHeight: 80, fontFamily: "inherit", resize: "vertical" }} />
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <NoteFormatToolbar textareaRef={editRef} value={content} onChange={setContent} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#6b6455" }}>
+              Data e hora do fato
+              <input type="datetime-local" value={occurredLocal} onChange={(e) => setOccurredLocal(e.target.value)}
+                style={{ border: "1px solid #ddd6c8", borderRadius: 6, padding: "4px 8px", fontSize: 12.5, fontFamily: "inherit" }} />
+            </label>
+          </div>
+          <textarea ref={editRef} aria-label="Editar anotação" value={content} onChange={(e) => setContent(e.target.value)} style={{ fontSize: 15, lineHeight: 1.6, border: "1px solid #ddd6c8", borderRadius: 6, padding: "8px 10px", minHeight: 80, fontFamily: "inherit", resize: "vertical" }} />
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => { setEditing(false); setContent(note.content); }} style={{ background: "none", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer", color: MUTED }}>Cancelar</button>
-            <button onClick={() => { onEdit(note.id, { content }); setEditing(false); }} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer" }}>Salvar</button>
+            <button onClick={() => {
+              if (!content.trim()) return;
+              onEdit(note.id, { content: content.trim(), occurredAt: localInputToISO(occurredLocal), date: occurredLocal.slice(0, 10) || note.date });
+              setEditing(false);
+            }} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer" }}>Salvar</button>
           </div>
         </>
       ) : (
-        <div onMouseUp={handleMouseUp} style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a", whiteSpace: "pre-wrap" }}>{note.content}</div>
+        <div onMouseUp={handleMouseUp}><NoteBody text={note.content} style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a" }} /></div>
       )}
 
       {(participants.length > 0 || derivedTaskCount > 0) && (
@@ -1989,7 +2193,8 @@ function MobileCaseScreen({
   contracts, contractCaseIds, onEditContract, onLinkContract, onMoveTask,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
-  const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
+  const [wsTab, setWsTabState] = useState(() => readCaseTab(item.id, isConsultoria));
+  const setWsTab = (id) => { setWsTabState(id); saveCaseTab(item.id, id); };
   const [taskView, setTaskView] = useState("lista");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
@@ -2047,17 +2252,21 @@ function MobileCaseScreen({
             <CaseTypeTags types={caseTypes} catalog={caseTypesCatalog} onAdd={onAddCaseType} onRemove={onRemoveCaseType} />
           </div>
         )}
-        <div style={{ display: "flex", gap: 22, overflowX: "auto", paddingTop: 13, paddingBottom: 13, borderTop: "1px solid rgba(232,226,213,0.12)", whiteSpace: "nowrap" }}>
+        <div role="tablist" aria-label="Seções do caso" style={{ display: "flex", gap: 22, overflowX: "auto", paddingTop: 13, paddingBottom: 13, borderTop: "1px solid rgba(232,226,213,0.12)", whiteSpace: "nowrap" }}>
           {TABS.map((t) => {
             const active = wsTab === t.id;
             return (
-              <div key={t.id} onClick={() => setWsTab(t.id)} style={{
+              <button key={t.id} type="button" role="tab" data-tab-id={t.id} aria-selected={active} tabIndex={active ? 0 : -1}
+                onClick={() => setWsTab(t.id)}
+                onKeyDown={(e) => handleTabKeyDown(e, TABS.map((x) => x.id), wsTab, setWsTab)}
+                style={{
+                background: "none", border: "none", fontFamily: "inherit", padding: "0 0 4px",
                 fontSize: 15, cursor: "pointer", flexShrink: 0,
                 color: active ? "#f5efe4" : "rgba(240,234,221,0.65)", fontWeight: active ? 700 : 400,
-                borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent", paddingBottom: 4,
+                borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
               }}>
                 {t.label}{t.count > 0 ? ` ${t.count}` : ""}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -2146,7 +2355,7 @@ function MobileCaseScreen({
                       <span style={{ fontSize: 10.5, fontWeight: 600, padding: "3px 8px", borderRadius: 20, background: noteTypeMeta(latestNote.type).bg, color: "#12283f" }}>{noteTypeMeta(latestNote.type).label}</span>
                       <span style={{ fontSize: 11.5, color: "#857d6c" }}>{fmtDateTime(latestNote.occurredAt || latestNote.date)}</span>
                     </div>
-                    <p style={{ fontSize: 13, lineHeight: 1.5, color: INK, margin: 0 }}>{latestNote.content}</p>
+                    <NoteBody text={latestNote.content} style={{ fontSize: 13, lineHeight: 1.5, color: INK }} />
                   </>
                 ) : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
               </div>
@@ -2400,7 +2609,8 @@ function CaseWorkspace({
   contracts, contractCaseIds, onEditContract, onLinkContract, onMoveTask,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
-  const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
+  const [wsTab, setWsTabState] = useState(() => readCaseTab(item.id, isConsultoria));
+  const setWsTab = (id) => { setWsTabState(id); saveCaseTab(item.id, id); };
   const [taskView, setTaskView] = useState("lista");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
@@ -2465,11 +2675,14 @@ function CaseWorkspace({
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20 }}>
+      <div role="tablist" aria-label="Seções do caso" style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20, overflowX: "auto" }}>
         {TABS.map((t) => {
           const active = wsTab === t.id;
           return (
-            <button key={t.id} onClick={() => setWsTab(t.id)} style={{
+            <button key={t.id} type="button" role="tab" data-tab-id={t.id} aria-selected={active} tabIndex={active ? 0 : -1}
+              onClick={() => setWsTab(t.id)}
+              onKeyDown={(e) => handleTabKeyDown(e, TABS.map((x) => x.id), wsTab, setWsTab)}
+              style={{ whiteSpace: "nowrap",
               background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
               fontSize: 14, fontWeight: active ? 600 : 400, color: active ? SIDEBAR_NAVY : TEXT_SECONDARY,
               padding: "0 0 11px", borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
@@ -2572,7 +2785,7 @@ function CaseWorkspace({
                         <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 20, background: noteTypeMeta(latestNote.type).bg, color: "#12283f" }}>{noteTypeMeta(latestNote.type).label}</span>
                         <span style={{ fontSize: 12, color: "#857d6c" }}>{fmtDateTime(latestNote.occurredAt || latestNote.date)} · {latestNote.authorName || "—"}</span>
                       </div>
-                      <p style={{ fontSize: 14, lineHeight: 1.55, color: INK, margin: 0 }}>{latestNote.content}</p>
+                      <NoteBody text={latestNote.content} style={{ fontSize: 14, lineHeight: 1.55, color: INK }} />
                     </>
                   ) : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
                 </div>
@@ -3525,11 +3738,12 @@ function ContractDetail({ contract, status, caseIds, types, cases, clients, task
         </div>
       </div>
 
-      <div role="tablist" style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20, overflowX: "auto" }}>
+      <div role="tablist" aria-label="Seções do contrato" style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20, overflowX: "auto" }}>
         {TABS.map((t) => {
           const active = cTab === t.id;
           return (
-            <button key={t.id} role="tab" aria-selected={active} type="button" onClick={() => setCTab(t.id)} style={{
+            <button key={t.id} role="tab" data-tab-id={t.id} aria-selected={active} tabIndex={active ? 0 : -1} type="button"
+              onClick={() => setCTab(t.id)} onKeyDown={(e) => handleTabKeyDown(e, TABS.map((x) => x.id), cTab, setCTab)} style={{
               background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
               fontSize: 14, fontWeight: active ? 600 : 400, color: active ? SIDEBAR_NAVY : TEXT_SECONDARY,
               padding: "0 0 11px", borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
@@ -5067,10 +5281,17 @@ export default function RSACApp() {
   const handleEditNoteContent = useCallback(async (noteId, patch) => {
     const current = notes.find((n) => n.id === noteId);
     if (!current) return;
+    if (current.authorId && current.authorId !== session?.user?.id) { alert("Só o autor pode editar esta anotação."); return; }
     const merged = { ...current, ...patch, updatedAt: new Date().toISOString() };
     const saved = await editRow("notes", noteId, merged);
     if (saved) setNotes((prev) => prev.map((n) => (n.id === noteId ? saved : n)));
-  }, [notes]);
+  }, [notes, session]);
+
+  const deleteNote = useCallback((noteId) => {
+    const n = notes.find((x) => x.id === noteId);
+    if (n?.authorId && n.authorId !== session?.user?.id) { alert("Só o autor pode apagar esta anotação."); return; }
+    removeRow("notes", noteId);
+  }, [notes, session]);
 
   const handleTogglePinNote = useCallback(async (note) => {
     const otherPinned = notes.find((n) => n.caseId === note.caseId && n.pinned && n.id !== note.id);
@@ -5096,37 +5317,70 @@ export default function RSACApp() {
     setModal("task");
   }, []);
 
+  // --- Sincronia tarefa ↔ Google Agenda ---
+  // Regra: compromisso (data + hora) e não concluído → existe no Google; concluído com data futura ou sem hora → sai do Google.
+  const googleTokenRef = useRef(null);
+  googleTokenRef.current = googleToken;
+  const tasksRef = useRef([]);
+  tasksRef.current = tasks;
+
+  const syncTaskWithGoogle = useCallback(async (task, { silent = true } = {}) => {
+    const token = googleTokenRef.current;
+    const wantsEvent = !!(task.time && task.dueDate) && !(task.done && task.dueDate >= todayISO());
+    const appt = { title: task.title, date: task.dueDate, time: task.time, location: task.location, reminder: task.reminder };
+    let patch = null;
+    if (!token) {
+      // Sem conexão com o Google nesta sessão: marca como pendente para o "Sincronizar todos"
+      if (wantsEvent && task.googleSynced) patch = { googleSynced: false };
+    } else if (!wantsEvent) {
+      if (task.googleEventId && await deleteGoogleEvent(token, task.googleEventId)) patch = { googleEventId: null, googleSynced: false };
+    } else if (task.googleEventId) {
+      const r = await updateGoogleEvent(token, task.googleEventId, appt);
+      if (r === "ok") patch = task.googleSynced ? null : { googleSynced: true };
+      else if (r === "gone") {
+        const newId = await pushEventToGoogle(token, appt, silent);
+        patch = newId ? { googleEventId: newId, googleSynced: true } : { googleEventId: null, googleSynced: false };
+      } else patch = { googleSynced: false };
+    } else {
+      const newId = await pushEventToGoogle(token, appt, silent);
+      if (newId) patch = { googleEventId: newId, googleSynced: true };
+    }
+    if (!patch) return task;
+    const next = { ...task, ...patch };
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t)));
+    const persisted = {};
+    if ("googleSynced" in patch) persisted.google_synced = patch.googleSynced;
+    if ("googleEventId" in patch) persisted.google_event_id = patch.googleEventId;
+    await updateRow("tasks", task.id, persisted);
+    return next;
+  }, []);
+
   const addTaskWithSync = useCallback(async (values) => {
     const saved = await insertRow("tasks", values);
     if (!saved) return;
     setTasks((prev) => [...prev, saved]);
-    if (saved.time && googleToken) {
-      const ok = await pushEventToGoogle(googleToken, { title: saved.title, date: saved.dueDate, time: saved.time, location: saved.location, reminder: saved.reminder });
-      if (ok) {
-        const updated = await editRow("tasks", saved.id, { ...saved, googleSynced: true });
-        if (updated) setTasks((prev) => prev.map((t) => t.id === saved.id ? updated : t));
-      }
-    }
-  }, [googleToken]);
+    if (saved.time && googleTokenRef.current) await syncTaskWithGoogle(saved, { silent: false });
+  }, [syncTaskWithGoogle]);
 
   const syncAllTasks = useCallback(async () => {
     if (!googleToken) return { total: 0, ok: 0 };
-    const pending = tasks.filter((t) => t.time && !t.googleSynced);
+    const pending = tasks.filter((t) => t.time && t.dueDate && !t.googleSynced && !(t.done && t.dueDate >= todayISO()));
     let okCount = 0;
     for (const t of pending) {
-      const ok = await pushEventToGoogle(googleToken, { title: t.title, date: t.dueDate, time: t.time, location: t.location, reminder: t.reminder }, true);
-      if (ok) {
-        okCount++;
-        const updated = await editRow("tasks", t.id, { ...t, googleSynced: true });
-        if (updated) setTasks((prev) => prev.map((x) => x.id === t.id ? updated : x));
-      }
+      const result = await syncTaskWithGoogle(t);
+      if (result.googleSynced) okCount++;
     }
     alert(`Sincronização concluída: ${okCount} de ${pending.length} compromisso(s) enviados ao Google Agenda.`);
     return { total: pending.length, ok: okCount };
-  }, [googleToken, tasks]);
+  }, [googleToken, tasks, syncTaskWithGoogle]);
 
   const removeRow = useCallback(async (key, id) => {
     if (roleRef.current !== "admin") { alert("Apenas o administrador pode excluir registros."); return; }
+    if (key === "tasks") {
+      // Excluir a tarefa também tira o compromisso do Google Agenda (quando conectado)
+      const t = tasksRef.current.find((x) => x.id === id);
+      if (t?.googleEventId && googleTokenRef.current) await deleteGoogleEvent(googleTokenRef.current, t.googleEventId);
+    }
     setters[key]((prev) => prev.filter((r) => r.id !== id));
     await deleteRow(key, id);
   }, []);
@@ -5148,20 +5402,27 @@ export default function RSACApp() {
   }, []);
 
   const editTaskRow = useCallback(async (id, values) => {
-    const updated = await editRow("tasks", id, values);
-    if (updated) setTasks((prev) => prev.map((t) => t.id === id ? updated : t));
-  }, []);
+    // O formulário não traz os campos de sincronia — preserva os atuais para não perder o vínculo com o Google
+    const current = tasksRef.current.find((t) => t.id === id) || {};
+    const updated = await editRow("tasks", id, { ...current, ...values });
+    if (!updated) return;
+    setTasks((prev) => prev.map((t) => t.id === id ? updated : t));
+    const relevant = ["title", "dueDate", "time", "location", "reminder"].some((k) => (current[k] || null) !== (updated[k] || null));
+    if (relevant || (updated.time && !updated.googleSynced)) await syncTaskWithGoogle(updated);
+  }, [syncTaskWithGoogle]);
 
   // Arrastar na semana do caso: muda a data da tarefa (atualização otimista; reverte se falhar)
   const moveTaskToDate = useCallback(async (task, newDate) => {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, dueDate: newDate } : t)));
     const updated = await editRow("tasks", task.id, { ...task, dueDate: newDate });
-    if (updated) setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-    else {
+    if (updated) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+      await syncTaskWithGoogle(updated);
+    } else {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
       alert("Não foi possível mudar a data da tarefa. Tente novamente.");
     }
-  }, []);
+  }, [syncTaskWithGoogle]);
 
   const editFinanceRow = useCallback(async (id, values) => {
     const updated = await editRow("finance", id, values);
@@ -5207,7 +5468,9 @@ export default function RSACApp() {
     const completedAt = newDone ? todayISO() : null;
     setTasks((prev) => prev.map((x) => x.id === id ? { ...x, done: newDone, completedAt } : x));
     await updateRow("tasks", id, { done: newDone, completed_at: completedAt });
-  }, [tasks]);
+    // Concluir tira o compromisso futuro do Google; reabrir devolve
+    if (t.time && t.dueDate) await syncTaskWithGoogle({ ...t, done: newDone, completedAt });
+  }, [tasks, syncTaskWithGoogle]);
 
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const useSubmission = (i) => {
@@ -5310,6 +5573,17 @@ export default function RSACApp() {
   if (!session) return <LoginScreen onClientPortalAccess={setPortalData} />;
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: MUTED, fontFamily: "Georgia, serif" }}>Carregando RSAC…</div>;
 
+  const withUser = (node) => (
+    <CurrentUserContext.Provider value={{ id: session?.user?.id || null }}>
+      <style>{`
+        .rsac-app button:focus-visible, .rsac-app a:focus-visible, .rsac-app input:focus-visible, .rsac-app select:focus-visible, .rsac-app textarea:focus-visible {
+          outline: 2px solid #c9a227; outline-offset: 2px;
+        }
+      `}</style>
+      <div className="rsac-app" style={{ display: "contents" }}>{node}</div>
+    </CurrentUserContext.Provider>
+  );
+
   if (isMobile) {
     const mobileTab = tab === "dashboard" ? "cases" : tab;
     const wsCase = activeCaseId ? cases.find((c) => c.id === activeCaseId) : null;
@@ -5323,10 +5597,10 @@ export default function RSACApp() {
       calendar: () => { setEditingTask(null); setFolderCaseId(null); setModal("task"); },
     }[mobileTab];
 
-    return (
+    return withUser(
       <div style={{ minHeight: "100vh", background: CONTENT_BG, fontFamily: "Arial, sans-serif" }}>
         {wsCase ? (
-          <MobileCaseScreen item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
+          <MobileCaseScreen key={wsCase.id} item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
             events={events} tasks={tasks} notes={notes} documents={documents} finance={finance}
             onBack={() => setActiveCaseId(null)}
             onEdit={() => { setEditingCase(wsCase); setModal("case"); }}
@@ -5339,7 +5613,7 @@ export default function RSACApp() {
             onAddTask={() => { setFolderCaseId(wsCase.id); setModal("task"); }}
             onEditTask={(t) => { setEditingTask(t); setModal("task"); }}
             onAddNote={() => { setFolderCaseId(wsCase.id); setModal("note"); }}
-            onDeleteNote={(id) => removeRow("notes", id)}
+            onDeleteNote={deleteNote}
             onAddDoc={() => { setFolderCaseId(wsCase.id); setModal("document"); }}
             onDeleteDoc={(id) => removeRow("documents", id)}
             onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
@@ -5487,20 +5761,20 @@ export default function RSACApp() {
     );
   }
 
-  return (
+  return withUser(
     <div style={{ display: "flex", minHeight: 560, background: CREAM, fontFamily: "Arial, sans-serif", borderRadius: 10, overflow: "hidden", border: "1px solid #EAE7DC" }}>
       <div style={{ width: 268, background: SIDEBAR_NAVY, padding: "26px 16px 20px", display: "flex", flexDirection: "column", gap: 22, flexShrink: 0 }}>
         <div style={{ textAlign: "center", padding: "0 8px 16px", borderBottom: "1px solid rgba(232,226,213,0.16)" }}>
           <Logo dark />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <nav aria-label="Navegação principal" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {NAV.map((n) => {
             const active = !activeCaseId && tab === n.id;
             const hovered = hoveredNavId === n.id && !active;
             const Icon = n.icon;
             return (
-              <button key={n.id} onClick={() => goToTab(n.id)}
+              <button key={n.id} type="button" onClick={() => goToTab(n.id)} aria-current={active ? "page" : undefined}
                 onMouseEnter={() => setHoveredNavId(n.id)} onMouseLeave={() => setHoveredNavId(null)}
                 style={{
                 display: "flex", alignItems: "center", gap: 12, padding: active ? "10px 12px 10px 9px" : "10px 12px",
@@ -5514,12 +5788,12 @@ export default function RSACApp() {
               </button>
             );
           })}
-        </div>
+        </nav>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minHeight: 0, overflowY: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 12px 6px" }}>
             <span style={{ fontSize: 10, letterSpacing: 1.5, fontWeight: 600, color: "rgba(240,234,221,0.45)" }}>CASOS ATIVOS</span>
-            <button onClick={() => { setEditingCase(null); setModal("case"); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.5)", fontSize: 15, padding: 0 }}>+</button>
+            <button type="button" aria-label="Novo caso" onClick={() => { setEditingCase(null); setModal("case"); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.7)", fontSize: 15, padding: 0 }}>+</button>
           </div>
           {activeCasesList.length === 0 && (
             <div style={{ padding: "6px 12px", fontSize: 12, color: "rgba(240,234,221,0.4)" }}>Nenhum caso ativo.</div>
@@ -5530,9 +5804,10 @@ export default function RSACApp() {
             const statusColorOnNavy = c.deadline.status === "overdue" || c.deadline.status === "today" ? ALERT_ON_NAVY
               : c.deadline.status === "upcoming" ? GOLD_ACCENT : "rgba(240,234,221,0.45)";
             return (
-              <div key={c.id} onClick={() => openCase(c.id)} title={c.title}
+              <button key={c.id} type="button" onClick={() => openCase(c.id)} title={c.title} aria-current={active ? "page" : undefined}
                 onMouseEnter={() => setHoveredCaseItemId(c.id)} onMouseLeave={() => setHoveredCaseItemId(null)}
                 style={{
+                display: "block", width: "100%", textAlign: "left", fontFamily: "inherit", border: "none",
                 padding: "10px 12px", borderRadius: 6, cursor: "pointer",
                 background: active ? NAV_ACTIVE_BG : hovered ? NAV_HOVER_BG : "transparent",
                 borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "3px solid transparent",
@@ -5543,7 +5818,7 @@ export default function RSACApp() {
                   display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
                 }}>{c.title}</div>
                 <div style={{ fontSize: 11, marginTop: 4, color: statusColorOnNavy }}>{c.deadline.label}</div>
-              </div>
+              </button>
             );
           })}
           <button onClick={() => goToTab("cases")} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.5)", fontSize: 12, textAlign: "left", padding: "8px 12px 0" }}>Ver todos os casos →</button>
@@ -5575,7 +5850,7 @@ export default function RSACApp() {
             const wsCase = cases.find((c) => c.id === activeCaseId);
             if (!wsCase) return <Empty text="Caso não encontrado." />;
             return (
-              <CaseWorkspace item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
+              <CaseWorkspace key={wsCase.id} item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
                 events={events} tasks={tasks} notes={notes} documents={documents} precedents={precedents} finance={finance}
                 onEdit={() => { setEditingCase(wsCase); setModal("case"); }}
                 onDelete={() => { removeRow("cases", wsCase.id); setActiveCaseId(null); }}
@@ -5588,7 +5863,7 @@ export default function RSACApp() {
                 onAddTask={() => { setFolderCaseId(wsCase.id); setModal("task"); }}
                 onEditTask={(t) => { setEditingTask(t); setModal("task"); }}
                 onAddNote={() => { setFolderCaseId(wsCase.id); setModal("note"); }}
-                onDeleteNote={(id) => removeRow("notes", id)}
+                onDeleteNote={deleteNote}
                 onAddDoc={() => { setFolderCaseId(wsCase.id); setModal("document"); }}
                 onDeleteDoc={(id) => removeRow("documents", id)}
                 onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
