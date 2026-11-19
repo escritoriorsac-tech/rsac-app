@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /equipe
+Disallow: /portal
+Sitemap: https://www.rsaempresarial.com.br/sitemap.xml

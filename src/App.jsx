@@ -7,14 +7,13 @@ import {
   MapPin, Linkedin, MessageCircle, Clock, AlertTriangle, Calculator, UserCog
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
+import PublicSite from "./PublicSite.jsx";
 
 const NAVY = "#0F2A43";
 const GOLD = "#B08D57";
 const CREAM = "#FBFAF7";
 const INK = "#2C2C2A";
 const MUTED = "#6b6a63";
-// Base para elementos clicáveis que viraram <button> (mantém a aparência de texto/chip)
-const BTN_RESET = { background: "none", border: "none", padding: 0, margin: 0, fontFamily: "inherit", fontSize: "inherit", lineHeight: "inherit", color: "inherit", textAlign: "inherit", cursor: "pointer" };
 const GOOGLE_CLIENT_ID = "823117991422-0c5s9k8fkfej75b2knaom078bv88odpd.apps.googleusercontent.com";
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
@@ -85,181 +84,40 @@ async function generateProcuracao(client, extra) {
   a.remove();
   URL.revokeObjectURL(url);
 }
-// Corpo do evento no formato da API do Google Agenda (compromisso de 1h, ou dia inteiro sem hora)
-function googleEventBody(appt) {
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
-  let start, end;
-  if (appt.time) {
-    start = { dateTime: `${appt.date}T${appt.time}:00`, timeZone: tz };
-    const [h, m] = appt.time.split(":").map(Number);
-    const endDate = new Date(appt.date + "T00:00:00");
-    endDate.setHours(h, m + 60);
-    const endDay = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
-    const endTime = `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`;
-    end = { dateTime: `${endDay}T${endTime}:00`, timeZone: tz };
-  } else {
-    const next = new Date(appt.date + "T00:00:00");
-    next.setDate(next.getDate() + 1);
-    start = { date: appt.date };
-    end = { date: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}` };
-  }
-  return {
-    summary: appt.title, location: appt.location || undefined, start, end,
-    reminders: appt.reminder === "none" ? { useDefault: false, overrides: [] }
-      : { useDefault: false, overrides: [{ method: "popup", minutes: appt.reminder === "1h" ? 60 : 1440 }] },
-  };
-}
-
-// Atualiza um evento já enviado. Retorna "ok", "gone" (apagado no Google) ou "error".
-async function updateGoogleEvent(accessToken, eventId, appt) {
-  try {
-    const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(googleEventBody(appt)),
-    });
-    if (resp.ok) return "ok";
-    if (resp.status === 404 || resp.status === 410) return "gone";
-    console.error("Falha ao atualizar evento no Google Agenda", resp.status, await resp.text());
-    return "error";
-  } catch (e) {
-    console.error("Falha ao atualizar evento no Google Agenda", e);
-    return "error";
-  }
-}
-
-async function deleteGoogleEvent(accessToken, eventId) {
-  try {
-    const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (resp.ok || resp.status === 404 || resp.status === 410) return true;
-    console.error("Falha ao remover evento do Google Agenda", resp.status, await resp.text());
-    return false;
-  } catch (e) {
-    console.error("Falha ao remover evento do Google Agenda", e);
-    return false;
-  }
-}
-
-// Envia um novo evento. Retorna o id do evento criado (ou null em caso de falha).
 async function pushEventToGoogle(accessToken, appt, silent) {
   try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
+    let start, end;
+    if (appt.time) {
+      start = { dateTime: `${appt.date}T${appt.time}:00`, timeZone: tz };
+      const [h, m] = appt.time.split(":").map(Number);
+      const endDate = new Date(appt.date + "T00:00:00");
+      endDate.setHours(h, m + 60);
+      const endTime = `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`;
+      end = { dateTime: `${appt.date}T${endTime}:00`, timeZone: tz };
+    } else {
+      start = { date: appt.date };
+      end = { date: appt.date };
+    }
     const resp = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(googleEventBody(appt)),
+      body: JSON.stringify({ summary: appt.title, location: appt.location || undefined, start, end }),
     });
     if (!resp.ok) {
       const errBody = await resp.text();
       console.error("Falha ao enviar evento ao Google Agenda", resp.status, errBody);
-      if (!silent) notifyError(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). Ele foi salvo no app normalmente.`);
-      return null;
+      if (!silent) alert(`Não foi possível enviar o compromisso ao Google Agenda (erro ${resp.status}). O compromisso foi salvo no app normalmente.`);
+      return false;
     }
-    const created = await resp.json().catch(() => null);
-    return created?.id || null;
+    return true;
   } catch (e) {
     console.error("Falha ao enviar evento ao Google Agenda", e);
-    if (!silent) notifyError("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). Ele foi salvo no app normalmente.");
-    return null;
+    if (!silent) alert("Não foi possível enviar o compromisso ao Google Agenda (falha de conexão). O compromisso foi salvo no app normalmente.");
+    return false;
 
   }
 }
-
-// --- Avisos na tela (substituem as janelas de alerta do navegador) ---
-// notify("mensagem", { tone: "error" | "success" | "info" }) — funciona em qualquer tela, inclusive no login.
-const TOAST_TONES = {
-  info: { bg: "#12283f", color: "#f5efe4", border: "#12283f", icon: "i" },
-  success: { bg: "#e4efe6", color: "#1f4d33", border: "#b9d5c1", icon: "✓" },
-  error: { bg: "#fbe3dc", color: "#7a2e14", border: "#e9b9a8", icon: "!" },
-  confirm: { bg: "#fff", color: "#23201a", border: "#ddd6c8", icon: "?" },
-};
-function toastContainer() {
-  let el = document.getElementById("rsac-toasts");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "rsac-toasts";
-    el.setAttribute("aria-live", "polite");
-    document.body.appendChild(el);
-  }
-  const mobile = window.innerWidth < 900;
-  Object.assign(el.style, {
-    position: "fixed", zIndex: "1000", display: "flex", flexDirection: "column", gap: "8px", pointerEvents: "none",
-    right: mobile ? "12px" : "20px", left: mobile ? "12px" : "auto", bottom: mobile ? "92px" : "20px",
-    maxWidth: mobile ? "none" : "380px", fontFamily: "Arial, sans-serif",
-  });
-  return el;
-}
-function showToast(message, { tone = "info", duration, actions } = {}) {
-  if (typeof document === "undefined") return () => {};
-  const t = TOAST_TONES[tone] || TOAST_TONES.info;
-  const box = document.createElement("div");
-  box.setAttribute("role", tone === "error" || tone === "confirm" ? "alert" : "status");
-  Object.assign(box.style, {
-    pointerEvents: "auto", background: t.bg, color: t.color, border: `1px solid ${t.border}`, borderRadius: "8px",
-    padding: "12px 14px", fontSize: "13.5px", lineHeight: "1.45", boxShadow: "0 8px 24px rgba(18,40,63,0.18)",
-    display: "flex", gap: "10px", alignItems: "flex-start", opacity: "0", transform: "translateY(6px)",
-    transition: "opacity 160ms ease, transform 160ms ease",
-  });
-  const icon = document.createElement("span");
-  icon.setAttribute("aria-hidden", "true");
-  icon.textContent = t.icon;
-  Object.assign(icon.style, { fontWeight: "700", flexShrink: "0", width: "16px", textAlign: "center" });
-  const body = document.createElement("div");
-  Object.assign(body.style, { flex: "1", minWidth: "0" });
-  const text = document.createElement("div");
-  text.textContent = message;
-  body.appendChild(text);
-  let closed = false;
-  const close = () => {
-    if (closed) return; closed = true;
-    box.style.opacity = "0"; box.style.transform = "translateY(6px)";
-    setTimeout(() => box.remove(), 180);
-  };
-  if (actions && actions.length) {
-    const row = document.createElement("div");
-    Object.assign(row.style, { display: "flex", gap: "8px", marginTop: "10px", justifyContent: "flex-end" });
-    actions.forEach((a) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = a.label;
-      Object.assign(b.style, {
-        fontFamily: "inherit", fontSize: "12.5px", fontWeight: "600", borderRadius: "6px", padding: "6px 12px", cursor: "pointer",
-        background: a.primary ? "#12283f" : "#fff", color: a.primary ? "#f5efe4" : "#12283f", border: "1px solid #ddd6c8",
-      });
-      b.onclick = () => { close(); a.onClick?.(); };
-      row.appendChild(b);
-    });
-    body.appendChild(row);
-  }
-  const x = document.createElement("button");
-  x.type = "button";
-  x.setAttribute("aria-label", "Fechar aviso");
-  x.textContent = "×";
-  Object.assign(x.style, { background: "none", border: "none", color: "inherit", fontSize: "18px", lineHeight: "1", cursor: "pointer", padding: "0 0 0 4px", opacity: "0.7" });
-  x.onclick = () => { close(); actions?.find((a) => a.onDismiss)?.onDismiss(); };
-  box.append(icon, body, x);
-  toastContainer().appendChild(box);
-  requestAnimationFrame(() => { box.style.opacity = "1"; box.style.transform = "translateY(0)"; });
-  const ms = duration === undefined ? (tone === "error" ? 7000 : 4500) : duration;
-  if (ms) setTimeout(close, ms);
-  return close;
-}
-const notify = (message, opts) => showToast(message, opts);
-const notifyError = (message) => showToast(message, { tone: "error" });
-// Confirmação na própria tela (substitui window.confirm). Resolve true/false.
-function confirmToast(message, confirmLabel = "Confirmar") {
-  return new Promise((resolve) => {
-    showToast(message, {
-      tone: "confirm", duration: 0,
-      actions: [
-        { label: "Cancelar", onClick: () => resolve(false), onDismiss: () => resolve(false) },
-        { label: confirmLabel, primary: true, onClick: () => resolve(true) },
-      ],
-    });
-  });
-}
-const SAVE_ERROR_MSG = "Não foi possível salvar. Verifique a conexão e tente novamente.";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => {
@@ -270,7 +128,6 @@ const fmtDate = (iso) => {
 const fmtBRL = (n) => (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtDateTime = (iso) => {
   if (!iso) return "—";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return fmtDate(iso);
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return fmtDate(iso);
   const datePart = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
@@ -298,7 +155,7 @@ const CASE_TYPE_PALETTE = [
 // camelCase (JS) <-> snake_case (Postgres)
 const toClient = (r) => ({ id: r.id, name: r.name, type: r.type, email: r.email, phone: r.phone, cpfCnpj: r.cpf_cnpj, rg: r.rg, newsletterOptIn: r.newsletter_opt_in, contactType: r.contact_type || "Cliente", address: r.address, accessCode: r.access_code, nacionalidade: r.nacionalidade, estadoCivil: r.estado_civil, profissao: r.profissao, orgaoExpedidorRg: r.orgao_expedidor_rg, representanteLegal: r.representante_legal });
 const toCase = (r) => ({ id: r.id, title: r.title, clientId: r.client_id, number: r.number, area: r.area, status: r.status, caseType: r.case_type || "Judicial", tribunal: r.tribunal, comarca: r.comarca, instancia: r.instancia, vara: r.vara, tribunalLink: r.tribunal_link, judgeId: r.judge_id, balcaoVirtualLink: r.balcao_virtual_link, valorCausa: r.valor_causa, honorariosContratuais: r.honorarios_contratuais, honorariosTipo: r.honorarios_tipo || "fixo", condenacaoResultado: r.condenacao_resultado, honorariosSucumbencia: r.honorarios_sucumbencia });
-const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id, time: r.time, location: r.location, googleSynced: r.google_synced || false, reminder: r.reminder || "1d", googleEventId: r.google_event_id || null });
+const toTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, done: r.done, caseId: r.case_id, notes: r.notes, completedAt: r.completed_at, isStallAlert: r.is_stall_alert, alertType: r.alert_type, financeId: r.finance_id, recurrenceGroup: r.recurrence_group, sourceNoteId: r.source_note_id, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toAppt = (r) => ({ id: r.id, title: r.title, date: r.date, time: r.time, location: r.location, googleSynced: r.google_synced || false });
 const toFinance = (r) => ({ id: r.id, description: r.description, amount: r.amount, type: r.type, date: r.date, clientId: r.client_id, caseId: r.case_id, bankAccount: r.bank_account, paid: r.paid !== false, recurrenceGroup: r.recurrence_group, settledAt: r.settled_at });
 const toEvent = (r) => ({ id: r.id, caseId: r.case_id, date: r.event_date, description: r.description, notes: r.notes, relatedProcess: r.related_process });
@@ -367,7 +224,7 @@ async function loadAll() {
 function toPayload(key, row) {
   if (key === "clients") return { name: row.name, type: row.type, email: row.email, phone: row.phone, cpf_cnpj: row.cpfCnpj || null, rg: row.rg || null, newsletter_opt_in: row.newsletterOptIn !== undefined ? row.newsletterOptIn : true, contact_type: row.contactType || "Cliente", address: row.address || null, nacionalidade: row.nacionalidade || null, estado_civil: row.estadoCivil || null, profissao: row.profissao || null, orgao_expedidor_rg: row.orgaoExpedidorRg || null, representante_legal: row.representanteLegal || null };
   if (key === "cases") return { title: row.title, client_id: row.clientId || null, number: row.number, area: row.area, status: row.status, case_type: row.caseType || "Judicial", tribunal: row.tribunal || null, comarca: row.comarca || null, instancia: row.instancia || null, vara: row.vara || null, tribunal_link: row.tribunalLink || null, judge_id: row.judgeId || null, balcao_virtual_link: row.balcaoVirtualLink || null, valor_causa: row.valorCausa || null, honorarios_contratuais: row.honorariosContratuais || null, honorarios_tipo: row.honorariosTipo || "fixo", condenacao_resultado: row.condenacaoResultado || null, honorarios_sucumbencia: row.honorariosSucumbencia || null };
-  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null, time: row.time || null, location: row.location || null, google_synced: row.googleSynced || false, reminder: row.reminder || "1d", google_event_id: row.googleEventId || null };
+  if (key === "tasks") return { title: row.title, due_date: row.dueDate || null, done: row.done || false, case_id: row.caseId || null, notes: row.notes || null, completed_at: row.completedAt || null, recurrence_group: row.recurrenceGroup || null, source_note_id: row.sourceNoteId || null, time: row.time || null, location: row.location || null, google_synced: row.googleSynced || false };
   if (key === "appts") return { title: row.title, date: row.date, time: row.time, location: row.location, google_synced: row.googleSynced || false };
   if (key === "finance") return { description: row.description, amount: row.amount, type: row.type, date: row.date, client_id: row.clientId || null, case_id: row.caseId || null, bank_account: row.bankAccount || null, paid: !!row.settledAt, settled_at: row.settledAt || null, recurrence_group: row.recurrenceGroup || null };
   if (key === "events") return { case_id: row.caseId, event_date: row.date, description: row.description, notes: row.notes || null, related_process: row.relatedProcess || null };
@@ -396,38 +253,25 @@ function toPayload(key, row) {
   return row;
 }
 
-// Colunas opcionais de tarefas (reminder, google_event_id): se ainda não existirem no Supabase,
-// salva a tarefa sem elas — evita quebrar o cadastro antes de rodar a migração.
-const isMissingReminderColumn = (error) => !!error && /reminder|google_event_id/i.test(`${error.message || ""} ${error.details || ""}`);
-const withoutReminder = (payload) => { const { reminder, google_event_id, ...rest } = payload; return rest; };
-
-async function insertRow(key, row, { quiet = false } = {}) {
-  let { data, error } = await supabase.from(TABLE_BY_KEY[key]).insert([toPayload(key, row)]).select();
-  if (key === "tasks" && isMissingReminderColumn(error)) {
-    ({ data, error } = await supabase.from(TABLE_BY_KEY[key]).insert([withoutReminder(toPayload(key, row))]).select());
-  }
-  if (error) { console.error(error); if (!quiet) notifyError(SAVE_ERROR_MSG); return null; }
+async function insertRow(key, row) {
+  const { data, error } = await supabase.from(TABLE_BY_KEY[key]).insert([toPayload(key, row)]).select();
+  if (error) { console.error(error); return null; }
   return MAPPER_BY_KEY[key](data[0]);
 }
 
 async function deleteRow(key, id) {
   const { error } = await supabase.from(TABLE_BY_KEY[key]).delete().eq("id", id);
-  if (error) { console.error(error); return false; }
-  return true;
+  if (error) console.error(error);
 }
 
-async function updateRow(key, id, patch, { quiet = false } = {}) {
+async function updateRow(key, id, patch) {
   const { error } = await supabase.from(TABLE_BY_KEY[key]).update(patch).eq("id", id);
-  if (error) { console.error(error); if (!quiet) notifyError(SAVE_ERROR_MSG); return false; }
-  return true;
+  if (error) console.error(error);
 }
 
-async function editRow(key, id, row, { quiet = false } = {}) {
-  let { data, error } = await supabase.from(TABLE_BY_KEY[key]).update(toPayload(key, row)).eq("id", id).select();
-  if (key === "tasks" && isMissingReminderColumn(error)) {
-    ({ data, error } = await supabase.from(TABLE_BY_KEY[key]).update(withoutReminder(toPayload(key, row))).eq("id", id).select());
-  }
-  if (error) { console.error(error); if (!quiet) notifyError(SAVE_ERROR_MSG); return null; }
+async function editRow(key, id, row) {
+  const { data, error } = await supabase.from(TABLE_BY_KEY[key]).update(toPayload(key, row)).eq("id", id).select();
+  if (error) { console.error(error); return null; }
   return MAPPER_BY_KEY[key](data[0]);
 }
 
@@ -453,18 +297,18 @@ async function fetchCaseTypesData() {
 async function createCaseType(name, existingCount) {
   const palette = CASE_TYPE_PALETTE[existingCount % CASE_TYPE_PALETTE.length];
   const { data, error } = await supabase.from("case_types").insert([{ name, bg_color: palette.bg, border_color: palette.border }]).select();
-  if (error) { console.error(error); notifyError("Não foi possível criar o tipo de consultoria."); return null; }
+  if (error) { console.error(error); return null; }
   return toCaseType(data[0]);
 }
 
 async function linkCaseType(caseId, typeId) {
   const { error } = await supabase.from("case_case_types").insert([{ case_id: caseId, case_type_id: typeId }]);
-  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
+  if (error) console.error(error);
 }
 
 async function unlinkCaseType(caseId, typeId) {
   const { error } = await supabase.from("case_case_types").delete().eq("case_id", caseId).eq("case_type_id", typeId);
-  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
+  if (error) console.error(error);
 }
 
 // --- Contratos: relações (casos vinculados + tipos), status derivado e vigência ---
@@ -487,19 +331,19 @@ async function fetchContractRelations() {
 
 async function linkContractCase(contractId, caseId) {
   const { error } = await supabase.from("contract_cases").insert([{ contract_id: contractId, case_id: caseId }]);
-  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
+  if (error) console.error(error);
 }
 async function unlinkContractCase(contractId, caseId) {
   const { error } = await supabase.from("contract_cases").delete().eq("contract_id", contractId).eq("case_id", caseId);
-  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
+  if (error) console.error(error);
 }
 async function linkContractType(contractId, typeId) {
   const { error } = await supabase.from("contract_types").insert([{ contract_id: contractId, case_type_id: typeId }]);
-  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
+  if (error) console.error(error);
 }
 async function unlinkContractType(contractId, typeId) {
   const { error } = await supabase.from("contract_types").delete().eq("contract_id", contractId).eq("case_type_id", typeId);
-  if (error) { console.error(error); notifyError(SAVE_ERROR_MSG); }
+  if (error) console.error(error);
 }
 
 function deriveContractStatus(contract) {
@@ -567,23 +411,14 @@ function Logo({ dark = true, size = "normal" }) {
       </div>
       {big && (
         <div style={{ fontFamily: "Georgia, serif", fontStyle: "italic", fontSize: 12, color: "#EDE6D8", marginTop: 14 }}>
-          Advocacia tributária e empresarial, com discrição.
+          Estratégia tributária para quem constrói negócios.
         </div>
       )}
     </div>
   );
 }
 
-function Field({ label, children, group = false }) {
-  // group: para conjuntos de botões/chips — um <label> envolvendo botões faria o clique no rótulo acionar o primeiro botão
-  if (group) {
-    return (
-      <div role="group" aria-label={typeof label === "string" ? label : undefined} style={{ display: "block", marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: MUTED, marginBottom: 4 }}>{label}</div>
-        {children}
-      </div>
-    );
-  }
+function Field({ label, children }) {
   return (
     <label style={{ display: "block", marginBottom: 12 }}>
       <div style={{ fontSize: 12, color: MUTED, marginBottom: 4 }}>{label}</div>
@@ -759,12 +594,12 @@ function CaseTypeTags({ types, catalog, onAdd, onRemove }) {
           borderRadius: 20, padding: "5px 11px",
         }} className="case-type-pill">
           {t.name}
-          <button type="button" onClick={() => onRemove(t.id)} style={{ ...BTN_RESET, cursor: "pointer", opacity: 0.55, fontSize: 12, lineHeight: 1 }} title="Remover tipo" aria-label="Remover tipo">×</button>
+          <span onClick={() => onRemove(t.id)} style={{ cursor: "pointer", opacity: 0.55, fontSize: 12, lineHeight: 1 }} title="Remover tipo">×</span>
         </span>
       ))}
-      <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} style={{ ...BTN_RESET,
+      <span onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} style={{
         fontSize: 12, color: "#8a6d3b", border: "1px dashed #d6cdb8", borderRadius: 20, padding: "5px 11px", cursor: "pointer",
-      }}>+ tipo</button>
+      }}>+ tipo</span>
 
       {open && (
         <>
@@ -820,135 +655,6 @@ const NOTE_TYPES = [
 ];
 const noteTypeMeta = (id) => NOTE_TYPES.find((t) => t.id === id) || NOTE_TYPES[0];
 
-// --- Navegação: última aba visitada de cada caso (por sessão do navegador) ---
-const CONSULTORIA_TAB_IDS = ["visao-geral", "contrato", "tarefas", "anotacoes", "documentos", "financeiro", "contatos"];
-const JUDICIAL_TAB_IDS = ["tarefas", "prazos", "documentos", "financeiro", "contatos"];
-function readCaseTab(caseId, isConsultoria) {
-  const allowed = isConsultoria ? CONSULTORIA_TAB_IDS : JUDICIAL_TAB_IDS;
-  try {
-    const saved = sessionStorage.getItem(`rsac:caseTab:${caseId}`);
-    if (saved && allowed.includes(saved)) return saved;
-  } catch (e) { /* armazenamento indisponível: usa a aba padrão */ }
-  return isConsultoria ? "visao-geral" : "tarefas";
-}
-function saveCaseTab(caseId, tabId) {
-  try { sessionStorage.setItem(`rsac:caseTab:${caseId}`, tabId); } catch (e) { /* ignora */ }
-}
-
-// Abas acessíveis: setas ←/→, Home e End trocam de aba e movem o foco
-function handleTabKeyDown(e, ids, current, select) {
-  const focused = e.currentTarget?.dataset?.tabId;
-  const i = ids.indexOf(focused && ids.includes(focused) ? focused : current);
-  let next = null;
-  if (e.key === "ArrowRight") next = ids[(i + 1) % ids.length];
-  else if (e.key === "ArrowLeft") next = ids[(i - 1 + ids.length) % ids.length];
-  else if (e.key === "Home") next = ids[0];
-  else if (e.key === "End") next = ids[ids.length - 1];
-  if (!next) return;
-  e.preventDefault();
-  select(next);
-  const list = e.currentTarget.closest('[role="tablist"]');
-  requestAnimationFrame(() => list?.querySelector(`[data-tab-id="${next}"]`)?.focus());
-}
-
-// Usuário logado (para regras de autoria das anotações)
-const CurrentUserContext = React.createContext({ id: null });
-
-// "YYYY-MM-DDTHH:mm" no fuso local, para <input type="datetime-local">
-function toLocalInputValue(iso) {
-  if (!iso) iso = new Date().toISOString();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return `${iso}T00:00`;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-const localInputToISO = (v) => (v ? new Date(v).toISOString() : new Date().toISOString());
-
-// --- Formatação simples das anotações: **negrito**, *itálico*, listas (- item / 1. item) e links ---
-const NOTE_INLINE_RE = /(\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\))|(\*\*([^*\n]+)\*\*)|(\*([^*\n]+)\*)|(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g;
-function renderNoteInline(text, keyBase) {
-  const out = [];
-  let last = 0; let m; let i = 0;
-  NOTE_INLINE_RE.lastIndex = 0;
-  while ((m = NOTE_INLINE_RE.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    const k = `${keyBase}-${i++}`;
-    const linkStyle = { color: NAVY, textDecoration: "underline" };
-    if (m[1]) out.push(<a key={k} href={m[3]} target="_blank" rel="noreferrer" style={linkStyle}>{m[2]}</a>);
-    else if (m[4]) out.push(<strong key={k}>{m[5]}</strong>);
-    else if (m[6]) out.push(<em key={k}>{m[7]}</em>);
-    else if (m[8]) out.push(<a key={k} href={m[8]} target="_blank" rel="noreferrer" style={linkStyle}>{m[8]}</a>);
-    last = NOTE_INLINE_RE.lastIndex;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
-function NoteBody({ text, style }) {
-  const lines = (text || "").split("\n");
-  const blocks = [];
-  let list = null;
-  lines.forEach((line, idx) => {
-    const ul = line.match(/^\s*[-•]\s+(.*)$/);
-    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    const kind = ul ? "ul" : ol ? "ol" : null;
-    if (kind) {
-      if (!list || list.kind !== kind) { list = { kind, items: [] }; blocks.push(list); }
-      list.items.push((ul || ol)[1]);
-      return;
-    }
-    list = null;
-    blocks.push({ kind: "p", text: line });
-  });
-  return (
-    <div style={style}>
-      {blocks.map((b, bi) => {
-        if (b.kind === "p") return <div key={bi} style={{ minHeight: b.text ? undefined : "0.8em" }}>{renderNoteInline(b.text, bi)}</div>;
-        const Tag = b.kind;
-        return <Tag key={bi} style={{ margin: "2px 0", paddingLeft: 22 }}>{b.items.map((it, ii) => <li key={ii}>{renderNoteInline(it, `${bi}-${ii}`)}</li>)}</Tag>;
-      })}
-    </div>
-  );
-}
-
-// Barra de formatação para o textarea das anotações
-function NoteFormatToolbar({ textareaRef, value, onChange }) {
-  const apply = (kind) => {
-    const el = textareaRef.current;
-    if (!el) return;
-    const start = el.selectionStart ?? value.length; const end = el.selectionEnd ?? value.length;
-    const sel = value.slice(start, end);
-    let insert; let selStart; let selEnd;
-    if (kind === "bold" || kind === "italic") {
-      const mark = kind === "bold" ? "**" : "*";
-      const inner = sel || (kind === "bold" ? "negrito" : "itálico");
-      insert = `${mark}${inner}${mark}`; selStart = start + mark.length; selEnd = selStart + inner.length;
-    } else if (kind === "list") {
-      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-      const block = value.slice(lineStart, end) || "";
-      const listed = block.split("\n").map((l) => (/^\s*[-•]\s+/.test(l) ? l : `- ${l}`)).join("\n");
-      const next = value.slice(0, lineStart) + listed + value.slice(end);
-      onChange(next);
-      requestAnimationFrame(() => { el.focus(); el.setSelectionRange(lineStart + listed.length, lineStart + listed.length); });
-      return;
-    } else {
-      const label = sel || "texto do link";
-      insert = `[${label}](https://)`; selStart = start + label.length + 3; selEnd = selStart + 8;
-    }
-    onChange(value.slice(0, start) + insert + value.slice(end));
-    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(selStart, selEnd); });
-  };
-  const btn = { background: "#fff", border: "1px solid #ddd6c8", borderRadius: 5, padding: "3px 9px", fontSize: 12.5, cursor: "pointer", color: "#4a4438", fontFamily: "inherit" };
-  return (
-    <div style={{ display: "flex", gap: 6 }} aria-label="Formatação">
-      <button type="button" onClick={() => apply("bold")} style={{ ...btn, fontWeight: 700 }} aria-label="Negrito">B</button>
-      <button type="button" onClick={() => apply("italic")} style={{ ...btn, fontStyle: "italic" }} aria-label="Itálico">I</button>
-      <button type="button" onClick={() => apply("list")} style={btn} aria-label="Lista">• Lista</button>
-      <button type="button" onClick={() => apply("link")} style={btn} aria-label="Link">Link</button>
-    </div>
-  );
-}
-
 function ParticipantPicker({ selectedIds, pool, onToggle }) {
   const [open, setOpen] = useState(false);
   const selected = pool.filter((p) => (selectedIds || []).includes(p.id));
@@ -983,41 +689,31 @@ function NoteComposer({ onAdd, participantsPool }) {
   const [type, setType] = useState("reuniao");
   const [participantIds, setParticipantIds] = useState([]);
   const [expanded, setExpanded] = useState(false);
-  const [occurredLocal, setOccurredLocal] = useState(() => toLocalInputValue());
-  const textareaRef = useRef(null);
 
   const submit = () => {
     if (!content.trim()) return;
-    onAdd({ content: content.trim(), type, participantIds, date: (occurredLocal || toLocalInputValue()).slice(0, 10), occurredAt: localInputToISO(occurredLocal) });
-    setContent(""); setParticipantIds([]); setExpanded(false); setOccurredLocal(toLocalInputValue());
+    onAdd({ content: content.trim(), type, participantIds, date: todayISO() });
+    setContent(""); setParticipantIds([]); setExpanded(false);
   };
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-      <textarea ref={textareaRef} aria-label="Nova anotação"
+      <textarea
         value={content} onChange={(e) => setContent(e.target.value)} onFocus={() => setExpanded(true)}
         placeholder="Escrever uma anotação…"
-        style={{ border: "none", outline: "none", resize: "vertical", fontSize: 15, fontFamily: "inherit", minHeight: expanded ? 90 : 24, color: "#23201a" }}
+        style={{ border: "none", outline: "none", resize: "none", fontSize: 15, fontFamily: "inherit", minHeight: expanded ? 70 : 24, color: "#23201a" }}
       />
       {expanded && (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <NoteFormatToolbar textareaRef={textareaRef} value={content} onChange={setContent} />
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#6b6455" }}>
-            Data e hora do fato
-            <input type="datetime-local" value={occurredLocal} onChange={(e) => setOccurredLocal(e.target.value)}
-              style={{ border: "1px solid #ddd6c8", borderRadius: 6, padding: "4px 8px", fontSize: 12.5, fontFamily: "inherit", color: "#23201a" }} />
-          </label>
-          <ParticipantPicker selectedIds={participantIds} pool={participantsPool} onToggle={(id) => setParticipantIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])} />
-        </div>
+        <ParticipantPicker selectedIds={participantIds} pool={participantsPool} onToggle={(id) => setParticipantIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])} />
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {NOTE_TYPES.map((t) => (
-            <button key={t.id} type="button" aria-pressed={type === t.id} onClick={() => setType(t.id)} style={{
-              fontSize: 12.5, padding: "6px 12px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit",
+            <span key={t.id} onClick={() => setType(t.id)} style={{
+              fontSize: 12.5, padding: "6px 12px", borderRadius: 20, cursor: "pointer",
               background: type === t.id ? t.bg : "#fff", color: type === t.id ? "#12283f" : "#6b6455",
-              fontWeight: type === t.id ? 600 : 400, border: type === t.id ? "1px solid transparent" : "1px solid #ddd6c8",
-            }}>{t.label}</button>
+              fontWeight: type === t.id ? 600 : 400, border: type === t.id ? "none" : "1px solid #ddd6c8",
+            }}>{t.label}</span>
           ))}
         </div>
         <button onClick={submit} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "9px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>Salvar</button>
@@ -1031,10 +727,10 @@ function PinnedNoteCard({ note, onUnpin }) {
     <div style={{ background: "#fdf9ec", border: "1px solid #e6d9b4", borderRadius: 8, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#8a6d3b" }}>📌 FIXADA</span>
-        <button type="button" onClick={onUnpin} style={{ ...BTN_RESET, fontSize: 12, color: "#8a6d3b", cursor: "pointer" }}>Desfixar</button>
+        <span onClick={onUnpin} style={{ fontSize: 12, color: "#8a6d3b", cursor: "pointer" }}>Desfixar</span>
       </div>
       <div style={{ fontSize: 12, color: "#857d6c" }}>atualizada em {fmtDateTime(note.updatedAt || note.occurredAt || note.date)} · {note.authorName || "—"}</div>
-      <NoteBody text={note.content} style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a" }} />
+      <div style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a", whiteSpace: "pre-wrap" }}>{note.content}</div>
     </div>
   );
 }
@@ -1042,12 +738,7 @@ function PinnedNoteCard({ note, onUnpin }) {
 function NoteCard({ note, participantsPool, onEdit, onDelete, onTogglePin, onCreateTask, derivedTaskCount }) {
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState(note.content);
-  const [occurredLocal, setOccurredLocal] = useState(() => toLocalInputValue(note.occurredAt || note.date));
   const [selMenu, setSelMenu] = useState(null);
-  const editRef = useRef(null);
-  const currentUser = React.useContext(CurrentUserContext);
-  // Só o autor edita ou apaga a anotação (anotações antigas, sem autor registrado, continuam livres)
-  const isAuthor = !note.authorId || note.authorId === currentUser.id;
   const meta = noteTypeMeta(note.type);
   const participants = participantsPool.filter((p) => (note.participantIds || []).includes(p.id));
   const edited = note.updatedAt && note.createdAt && note.updatedAt > note.createdAt;
@@ -1065,43 +756,26 @@ function NoteCard({ note, participantsPool, onEdit, onDelete, onTogglePin, onCre
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: meta.bg, color: "#12283f" }}>{meta.label}</span>
           <span style={{ fontSize: 13, color: "#857d6c" }}>
-            {fmtDateTime(note.occurredAt || note.date)} · {note.authorName || "—"}{edited ? ` · editada em ${fmtDateTime(note.updatedAt)}` : ""}
+            {fmtDateTime(note.occurredAt || note.date)} · {note.authorName || "—"}{edited ? " · editada" : ""}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 4, color: "#b8b0a0", flexShrink: 0 }}>
-          {[
-            { show: true, label: note.pinned ? "Desfixar" : "Fixar", icon: "📌", onClick: () => onTogglePin(note) },
-            { show: isAuthor, label: "Editar", icon: "✎", onClick: () => { setContent(note.content); setOccurredLocal(toLocalInputValue(note.occurredAt || note.date)); setEditing((v) => !v); } },
-            { show: isAuthor, label: "Excluir", icon: <Trash2 size={14} />, onClick: () => onDelete(note.id) },
-          ].filter((a) => a.show).map((a) => (
-            <button key={a.label} type="button" onClick={a.onClick} title={a.label} aria-label={a.label}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#8f877a", padding: "2px 5px", fontSize: 14, lineHeight: 1 }}>{a.icon}</button>
-          ))}
+        <div style={{ display: "flex", gap: 12, color: "#b8b0a0", flexShrink: 0 }}>
+          <span onClick={() => onTogglePin(note)} title={note.pinned ? "Desfixar" : "Fixar"} style={{ cursor: "pointer" }}>📌</span>
+          <span onClick={() => setEditing((v) => !v)} title="Editar" style={{ cursor: "pointer" }}>✎</span>
+          <span onClick={() => onDelete(note.id)} title="Excluir" style={{ cursor: "pointer" }}><Trash2 size={14} /></span>
         </div>
       </div>
 
       {editing ? (
         <>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <NoteFormatToolbar textareaRef={editRef} value={content} onChange={setContent} />
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#6b6455" }}>
-              Data e hora do fato
-              <input type="datetime-local" value={occurredLocal} onChange={(e) => setOccurredLocal(e.target.value)}
-                style={{ border: "1px solid #ddd6c8", borderRadius: 6, padding: "4px 8px", fontSize: 12.5, fontFamily: "inherit" }} />
-            </label>
-          </div>
-          <textarea ref={editRef} aria-label="Editar anotação" value={content} onChange={(e) => setContent(e.target.value)} style={{ fontSize: 15, lineHeight: 1.6, border: "1px solid #ddd6c8", borderRadius: 6, padding: "8px 10px", minHeight: 80, fontFamily: "inherit", resize: "vertical" }} />
+          <textarea value={content} onChange={(e) => setContent(e.target.value)} style={{ fontSize: 15, lineHeight: 1.6, border: "1px solid #ddd6c8", borderRadius: 6, padding: "8px 10px", minHeight: 80, fontFamily: "inherit", resize: "vertical" }} />
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => { setEditing(false); setContent(note.content); }} style={{ background: "none", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer", color: MUTED }}>Cancelar</button>
-            <button onClick={() => {
-              if (!content.trim()) return;
-              onEdit(note.id, { content: content.trim(), occurredAt: localInputToISO(occurredLocal), date: occurredLocal.slice(0, 10) || note.date });
-              setEditing(false);
-            }} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer" }}>Salvar</button>
+            <button onClick={() => { onEdit(note.id, { content }); setEditing(false); }} style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, cursor: "pointer" }}>Salvar</button>
           </div>
         </>
       ) : (
-        <div onMouseUp={handleMouseUp}><NoteBody text={note.content} style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a" }} /></div>
+        <div onMouseUp={handleMouseUp} style={{ fontSize: 15, lineHeight: 1.6, color: "#23201a", whiteSpace: "pre-wrap" }}>{note.content}</div>
       )}
 
       {(participants.length > 0 || derivedTaskCount > 0) && (
@@ -1118,17 +792,10 @@ function NoteCard({ note, participantsPool, onEdit, onDelete, onTogglePin, onCre
       {selMenu && (
         <>
           <div style={{ position: "fixed", inset: 0, zIndex: 69 }} onClick={() => setSelMenu(null)} />
-          <div role="menu" style={{
-            position: "fixed", left: selMenu.x, top: selMenu.y - 42, zIndex: 70, display: "flex",
-            background: "#12283f", borderRadius: 6, overflow: "hidden", boxShadow: "0 8px 24px rgba(18,40,63,0.22)",
-          }}>
-            {[{ kind: "task", label: "Criar tarefa" }, { kind: "appointment", label: "Criar compromisso" }, { kind: "document", label: "Criar documento" }].map((opt, i) => (
-              <button key={opt.kind} role="menuitem" onClick={() => { onCreateTask(note, selMenu.text, opt.kind); setSelMenu(null); window.getSelection()?.removeAllRanges(); }} style={{
-                background: "none", color: "#fff", border: "none", borderLeft: i ? "1px solid rgba(240,234,221,0.18)" : "none",
-                padding: "8px 12px", fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit",
-              }}>{opt.label}</button>
-            ))}
-          </div>
+          <button onClick={() => { onCreateTask(note, selMenu.text); setSelMenu(null); window.getSelection()?.removeAllRanges(); }} style={{
+            position: "fixed", left: selMenu.x, top: selMenu.y - 38, zIndex: 70,
+            background: "#12283f", color: "#fff", border: "none", borderRadius: 6, padding: "7px 12px", fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
+          }}>+ Criar tarefa</button>
         </>
       )}
     </div>
@@ -1153,9 +820,9 @@ function NotesPanel({ notes, participantsPool, tasks, onAdd, onEdit, onDelete, o
       <NoteComposer onAdd={onAdd} participantsPool={participantsPool} />
       {pinned && <PinnedNoteCard note={pinned} onUnpin={() => onTogglePin(pinned)} />}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <button type="button" onClick={() => setTypeFilter("todas")} style={{ ...BTN_RESET, fontSize: 12.5, padding: "5px 11px", borderRadius: 20, cursor: "pointer", background: typeFilter === "todas" ? "#e8e1d2" : "#fff", border: "1px solid #ddd6c8", fontWeight: typeFilter === "todas" ? 600 : 400 }}>Todas</button>
+        <span onClick={() => setTypeFilter("todas")} style={{ fontSize: 12.5, padding: "5px 11px", borderRadius: 20, cursor: "pointer", background: typeFilter === "todas" ? "#e8e1d2" : "#fff", border: "1px solid #ddd6c8", fontWeight: typeFilter === "todas" ? 600 : 400 }}>Todas</span>
         {NOTE_TYPES.map((t) => (
-          <button type="button" key={t.id} onClick={() => setTypeFilter(t.id)} style={{ ...BTN_RESET, fontSize: 12.5, padding: "5px 11px", borderRadius: 20, cursor: "pointer", background: typeFilter === t.id ? "#e8e1d2" : "#fff", border: "1px solid #ddd6c8", fontWeight: typeFilter === t.id ? 600 : 400 }}>{t.label}</button>
+          <span key={t.id} onClick={() => setTypeFilter(t.id)} style={{ fontSize: 12.5, padding: "5px 11px", borderRadius: 20, cursor: "pointer", background: typeFilter === t.id ? "#e8e1d2" : "#fff", border: "1px solid #ddd6c8", fontWeight: typeFilter === t.id ? 600 : 400 }}>{t.label}</span>
         ))}
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar nas anotações" style={{ marginLeft: "auto", fontSize: 12.5, border: "1px solid #ddd6c8", borderRadius: 6, padding: "6px 10px", minWidth: 160 }} />
       </div>
@@ -1177,9 +844,8 @@ function SubmitRow({ onClose, onSubmit, submitLabel }) {
 }
 
 // --- Semana de tarefas do caso (tela 4D): mesmo cadastro, hora decide se cai na Agenda ---
-function CaseTasksWeekView({ tasks, onEditTask, onMoveTask }) {
+function CaseTasksWeekView({ tasks, onEditTask }) {
   const [weekAnchor, setWeekAnchor] = useState(todayISO());
-  const [dragOverDay, setDragOverDay] = useState(null);
   const anchor = new Date(weekAnchor + "T00:00:00");
   const dow = (anchor.getDay() + 6) % 7; // 0 = segunda
   const weekStart = new Date(anchor);
@@ -1210,31 +876,13 @@ function CaseTasksWeekView({ tasks, onEditTask, onMoveTask }) {
           const isToday = dISO === today;
           const items = byDay[dISO] || [];
           return (
-            <div key={dISO}
-              onDragOver={(e) => { if (!onMoveTask) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOverDay !== dISO) setDragOverDay(dISO); }}
-              onDragLeave={() => setDragOverDay((d) => (d === dISO ? null : d))}
-              onDrop={(e) => {
-                e.preventDefault(); setDragOverDay(null);
-                const id = e.dataTransfer.getData("text/plain");
-                const t = tasks.find((x) => String(x.id) === id);
-                if (t && onMoveTask && t.dueDate !== dISO) onMoveTask(t, dISO);
-              }}
-              style={{
-                border: dragOverDay === dISO ? `2px dashed ${GOLD}` : isToday ? `1px solid ${GOLD}` : "1px solid #E3E0D6",
-                borderRadius: 8, padding: dragOverDay === dISO ? 6 : 7, minHeight: 108,
-                background: dragOverDay === dISO ? "#fdf9ec" : i >= 5 ? "#f4f0e5" : "#fff",
-              }}>
+            <div key={dISO} style={{ border: isToday ? `1px solid ${GOLD}` : "1px solid #E3E0D6", borderRadius: 8, padding: 7, minHeight: 108, background: "#fff" }}>
               <div style={{ fontSize: 10, color: isToday ? "#8a6d3b" : "#9A917E", fontWeight: isToday ? 700 : 400, textTransform: "uppercase" }}>{dayLabels[i]} {d.getDate()}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 6 }}>
                 {items.map((t) => (
-                  <div key={t.id} onClick={() => onEditTask(t)}
-                    draggable={!!onMoveTask}
-                    onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(t.id)); e.dataTransfer.effectAllowed = "move"; }}
-                    onDragEnd={() => setDragOverDay(null)}
-                    title={onMoveTask ? "Arraste para outro dia para mudar a data" : undefined}
-                    style={{
+                  <div key={t.id} onClick={() => onEditTask(t)} style={{
                     background: t.time ? NAVY : "#F1EFE8", color: t.time ? "#EDE6D8" : INK,
-                    borderRadius: 6, padding: "5px 7px", fontSize: 11, cursor: onMoveTask ? "grab" : "pointer", opacity: t.done ? 0.6 : 1, lineHeight: 1.3,
+                    borderRadius: 6, padding: "5px 7px", fontSize: 11, cursor: "pointer", opacity: t.done ? 0.6 : 1, lineHeight: 1.3,
                   }}>
                     {t.time && <div style={{ fontWeight: 700, color: GOLD, fontSize: 10.5 }}>{t.time}</div>}
                     <div>{t.title}</div>
@@ -1251,7 +899,7 @@ function CaseTasksWeekView({ tasks, onEditTask, onMoveTask }) {
           {noDate.map((t) => (
             <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F1EFE8" }}>
               <span style={{ fontSize: 13, color: INK, opacity: t.done ? 0.6 : 1 }}>{t.title}</span>
-              <button type="button" onClick={() => onEditTask(t)} style={{ ...BTN_RESET, fontSize: 12, color: NAVY, cursor: "pointer" }}>Definir data</button>
+              <span onClick={() => onEditTask(t)} style={{ fontSize: 12, color: NAVY, cursor: "pointer" }}>Definir data</span>
             </div>
           ))}
         </div>
@@ -1431,15 +1079,15 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
             ))}
           </div>
         </Field>
-        <Field group label="Tipos de consultoria (opcional)">
+        <Field label="Tipos de consultoria (opcional)">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {caseTypesCatalog.map((t) => {
               const selected = typeIds.includes(t.id);
               return (
-                <button type="button" key={t.id} onClick={() => setTypeIds((prev) => selected ? prev.filter((x) => x !== t.id) : [...prev, t.id])} style={{ ...BTN_RESET,
+                <span key={t.id} onClick={() => setTypeIds((prev) => selected ? prev.filter((x) => x !== t.id) : [...prev, t.id])} style={{
                   fontSize: 12, fontWeight: 600, padding: "5px 11px", borderRadius: 20, cursor: "pointer",
                   color: "#12283f", background: selected ? t.bg : "#fff", border: `1px solid ${selected ? t.border : "#ddd6c8"}`,
-                }}>{t.name}</button>
+                }}>{t.name}</span>
               );
             })}
             {caseTypesCatalog.length === 0 && <div style={{ fontSize: 12.5, color: MUTED }}>Nenhum tipo cadastrado ainda — crie um em algum caso de consultoria.</div>}
@@ -1484,8 +1132,6 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
   if (modal === "task") {
     const [title, setTitle] = useState(editing?.title || taskPrefill?.title || ""); const [dueDate, setDueDate] = useState(editing?.dueDate || "");
     const [time, setTime] = useState(editing?.time || "");
-    const [reminder, setReminder] = useState(editing?.reminder || "1d");
-    const isAppointment = !editing && !!taskPrefill?.asAppointment;
     const [location, setLocation] = useState(editing?.location || "");
     const [notes, setNotes] = useState(editing?.notes || "");
     const [caseId, setCaseId] = useState(editing?.caseId || taskCaseId || "");
@@ -1494,11 +1140,11 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
     const [unit, setUnit] = useState("month");
     const [times, setTimes] = useState(2);
     return (
-      <Modal title={editing ? "Editar tarefa" : isAppointment ? "Novo compromisso" : taskCaseId ? "Nova tarefa do caso" : "Nova tarefa"} onClose={onClose}>
+      <Modal title={editing ? "Editar tarefa" : taskCaseId ? "Nova tarefa do caso" : "Nova tarefa"} onClose={onClose}>
         <Field label="Descrição"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Protocolar manifestação" /></Field>
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ flex: 1 }}><Field label="Data"><input type="date" style={inputStyle} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></Field></div>
-          <div style={{ flex: 1 }}><Field label={isAppointment ? "Hora" : "Hora (opcional)"}><input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Hora (opcional)"><input type="time" style={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} /></Field></div>
         </div>
         {dueDate && (
           <div style={{ background: "#F7F3E8", border: "1px solid #E6D9B4", borderRadius: 6, padding: "10px 12px", fontSize: 12.5, color: "#6b5a2e", marginBottom: 12 }}>
@@ -1506,19 +1152,6 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
               ? `Com hora preenchida, entra na Agenda como compromisso de 1h em ${fmtDate(dueDate)}.`
               : "Sem hora, entra como item do dia — não aparece com horário marcado na Agenda."}
           </div>
-        )}
-        {dueDate && (
-          <Field group label="Lembrete">
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {[{ id: "1d", label: "1 dia antes" }, { id: "1h", label: "1 hora antes" }, { id: "none", label: "sem lembrete" }].map((r) => (
-                <button key={r.id} type="button" onClick={() => setReminder(r.id)} style={{
-                  fontSize: 12.5, padding: "6px 12px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit",
-                  background: reminder === r.id ? "#e4e9ef" : "#fff", color: reminder === r.id ? "#12283f" : "#6b6455",
-                  fontWeight: reminder === r.id ? 600 : 400, border: reminder === r.id ? "1px solid #c9d4e0" : "1px solid #ddd6c8",
-                }}>{r.label}</button>
-              ))}
-            </div>
-          </Field>
         )}
         {time && (
           <Field label="Local (opcional)"><input style={inputStyle} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Ex: Escritório, sala de reunião" /></Field>
@@ -1566,8 +1199,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
         {error && <div style={{ color: "#993D1D", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
         <SubmitRow onClose={onClose} onSubmit={() => {
           if (!title.trim()) { setError("Descreva a tarefa."); return; }
-          if (isAppointment && (!dueDate || !time)) { setError("Compromisso precisa de data e hora."); return; }
-          const base = { title: title.trim(), dueDate, time: time || null, reminder, location: time ? (location || null) : null, notes, caseId: editing ? (caseId || null) : (taskCaseId || null), sourceNoteId: editing ? editing.sourceNoteId : (taskPrefill?.sourceNoteId || null) };
+          const base = { title: title.trim(), dueDate, time: time || null, location: time ? (location || null) : null, notes, caseId: editing ? (caseId || null) : (taskCaseId || null), sourceNoteId: editing ? editing.sourceNoteId : (taskPrefill?.sourceNoteId || null) };
           if (editing) { onEditTask(editing.id, base); return; }
           if (recurrent && dueDate && Number(times) > 1) onAddTaskRecurring(base, Number(every), unit, Number(times));
           else onAddTask(base);
@@ -1658,7 +1290,7 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
   }
 
   if (modal === "document") {
-    const [name, setName] = useState(taskPrefill?.docName || ""); const [driveLink, setDriveLink] = useState("");
+    const [name, setName] = useState(""); const [driveLink, setDriveLink] = useState("");
     return (
       <Modal title="Novo documento" onClose={onClose}>
         <Field label="Nome do documento"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Petição inicial" /></Field>
@@ -1684,12 +1316,22 @@ function FormLayer({ modal, onClose, clients, cases, editing, prefill, taskCaseI
   return null;
 }
 
-function LoginScreen({ onClientPortalAccess }) {
+function LoginScreen({ onClientPortalAccess, onBackToSite }) {
+  const onPortalRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/portal");
+  const onTeamRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/equipe");
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
   const [error, setError] = useState(""); const [info, setInfo] = useState(""); const [busy, setBusy] = useState(false);
 
   const [portalCode, setPortalCode] = useState(""); const [portalError, setPortalError] = useState(""); const [portalBusy, setPortalBusy] = useState(false);
+
+  useEffect(() => {
+    try {
+      const c = sessionStorage.getItem("rsac_portal_code");
+      if (c) { sessionStorage.removeItem("rsac_portal_code"); setPortalCode(c); submitPortal(c); }
+    } catch (e) { /* ignora */ }
+    // eslint-disable-next-line
+  }, []);
 
   const [publicNews, setPublicNews] = useState([]);
   const [openNews, setOpenNews] = useState(null);
@@ -1712,15 +1354,16 @@ function LoginScreen({ onClientPortalAccess }) {
     setBusy(false);
   };
 
-  const submitPortal = async () => {
+  const submitPortal = async (codeArg) => {
     setPortalError("");
-    if (!portalCode.trim()) { setPortalError("Informe o código de acesso."); return; }
+    const codeVal = (typeof codeArg === "string" ? codeArg : portalCode).trim();
+    if (!codeVal) { setPortalError("Informe o código de acesso."); return; }
     setPortalBusy(true);
     try {
       const resp = await fetch("https://jrcojsnjxuykdczbqfuo.supabase.co/functions/v1/client-portal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_code: portalCode.trim() }),
+        body: JSON.stringify({ access_code: codeVal }),
       });
       const data = await resp.json();
       if (!resp.ok) { setPortalError(data.error || "Código de acesso inválido."); setPortalBusy(false); return; }
@@ -1733,9 +1376,11 @@ function LoginScreen({ onClientPortalAccess }) {
 
   return (
     <div style={{ background: NAVY, borderRadius: 10, padding: "28px 16px 20px" }}>
+      {onBackToSite && <div style={{ marginBottom: 14 }}><button onClick={onBackToSite} style={{ background: "none", border: "none", color: "#9FB0BE", fontSize: 12.5, cursor: "pointer", padding: 0 }}>← Voltar ao site</button></div>}
       <div style={{ marginBottom: 24 }}><Logo dark size="big" /></div>
 
       <div style={{ display: "flex", justifyContent: "center", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+        {!onPortalRoute && (
         <div style={{ background: CREAM, borderRadius: 10, padding: "24px 22px", flex: "1 1 260px", maxWidth: 300, boxSizing: "border-box" }}>
           <div style={{ fontSize: 11, color: MUTED, textTransform: "uppercase", letterSpacing: 1, textAlign: "center", marginBottom: 14 }}>Acesso da equipe</div>
           <Field label="E-mail"><input style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@rsac.com.br" /></Field>
@@ -1749,7 +1394,9 @@ function LoginScreen({ onClientPortalAccess }) {
             Acesso restrito. Para obter um login, fale com o administrador do escritório.
           </div>
         </div>
+        )}
 
+        {!onTeamRoute && (
         <div style={{ background: "#12233A", border: "1px solid #2A4560", borderRadius: 10, padding: "24px 22px", flex: "1 1 260px", maxWidth: 300, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center" }}>
           <div style={{ fontFamily: "Georgia, serif", fontSize: 16, color: "#EDE6D8", textAlign: "center", marginBottom: 4 }}>Portal do cliente</div>
           <div style={{ fontSize: 11, color: "#9FB0BE", textAlign: "center", marginBottom: 18 }}>Acompanhe seus casos e processos</div>
@@ -1764,6 +1411,7 @@ function LoginScreen({ onClientPortalAccess }) {
             Não tem um código? Veja abaixo como entrar em contato.
           </div>
         </div>
+        )}
       </div>
 
       <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid #24405C", borderRadius: 10, padding: "20px 22px", maxWidth: 620, margin: "0 auto 20px", textAlign: "center" }}>
@@ -2192,8 +1840,8 @@ function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
   const items = [
     { id: "deadlines", label: "Controle de Prazos", icon: Clock },
     ...(role === "admin" ? [
-      { id: "contracts", label: "Contratos", icon: FileText },
       { id: "finance", label: "Financeiro", icon: Wallet },
+      { id: "contracts", label: "Contratos", icon: FileText },
       { id: "quotes", label: "Orçamentos", icon: Calculator },
     ] : []),
     { id: "clients", label: "Contatos", icon: Users },
@@ -2225,16 +1873,9 @@ function MobileMoreSheet({ role, onNavigate, onClose, userEmail, onSignOut }) {
   );
 }
 
-function MobileCasosScreen({ cases, tasks, search, onSearchChange, onOpenCase, caseTypesCatalog = [], caseTypesByCaseId = {} }) {
-  const [typeFilter, setTypeFilter] = useState("todos");
+function MobileCasosScreen({ cases, tasks, search, onSearchChange, onOpenCase }) {
   const activeCasesList = cases
     .filter((c) => c.status === "Ativo")
-    .filter((c) => {
-      if (typeFilter === "todos") return true;
-      if (typeFilter === "__Judicial") return c.caseType !== "Consultoria";
-      if (typeFilter === "__Consultoria") return c.caseType === "Consultoria";
-      return (caseTypesByCaseId[c.id] || []).some((t) => t.id === typeFilter);
-    })
     .map((c) => ({ ...c, deadline: caseDeadlineInfo(c, tasks) }))
     .filter((c) => !search.trim() || c.title.toLowerCase().includes(search.trim().toLowerCase()))
     .sort((a, b) => {
@@ -2264,24 +1905,14 @@ function MobileCasosScreen({ cases, tasks, search, onSearchChange, onOpenCase, c
 
       <div style={{ padding: "16px 18px" }}>
         {todayItem && (
-          <button type="button" onClick={() => onOpenCase(todayItem.id)} style={{ display: "block", width: "100%", textAlign: "left", fontFamily: "inherit", background: "#fdf3f0", border: "1px solid #eccfc8", borderRadius: 10, padding: "14px 16px", marginBottom: 16, cursor: "pointer" }}>
-            <span style={{ display: "block", fontSize: 11, letterSpacing: "0.12em", fontWeight: 700, color: ALERT_ON_LIGHT, marginBottom: 4 }}>HOJE</span>
-            <span style={{ display: "block", fontSize: 16, color: TEXT_PRIMARY }}>{todayItem.title} — {todayItem.deadline.label}</span>
-          </button>
+          <div onClick={() => onOpenCase(todayItem.id)} style={{ background: "#fdf3f0", border: "1px solid #eccfc8", borderRadius: 10, padding: "14px 16px", marginBottom: 16, cursor: "pointer" }}>
+            <div style={{ fontSize: 11, letterSpacing: "0.12em", fontWeight: 700, color: ALERT_ON_LIGHT, marginBottom: 4 }}>HOJE</div>
+            <div style={{ fontSize: 16, color: TEXT_PRIMARY }}>{todayItem.title} — {todayItem.deadline.label}</div>
+          </div>
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
           <div style={{ fontFamily: "Georgia, serif", fontSize: 30, color: SIDEBAR_NAVY }}>Casos</div>
-          <label style={{ fontSize: 14, color: GOLD_DARK, display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Filtrar por tipo</span>
-            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{
-              border: "1px solid #e6e0d2", borderRadius: 6, background: "#fff", color: GOLD_DARK, fontSize: 14, padding: "6px 8px", fontFamily: "inherit",
-            }}>
-              <option value="todos">Ativos · todos</option>
-              <option value="__Judicial">Judicial</option>
-              <option value="__Consultoria">Consultoria</option>
-              {caseTypesCatalog.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </label>
+          <div style={{ fontSize: 14, color: GOLD_DARK }}>Ativos ⌄</div>
         </div>
         {activeCasesList.length === 0 && <p style={{ fontSize: 14, color: TEXT_META, textAlign: "center", padding: "20px 0" }}>Nenhum caso encontrado.</p>}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2291,17 +1922,16 @@ function MobileCasosScreen({ cases, tasks, search, onSearchChange, onOpenCase, c
             const statusColor = c.deadline.status === "overdue" || c.deadline.status === "today" ? ALERT_ON_LIGHT
               : c.deadline.status === "upcoming" ? GOLD_DARK : TEXT_META;
             return (
-              <button key={c.id} type="button" onClick={() => onOpenCase(c.id)} style={{
-                width: "100%", textAlign: "left", fontFamily: "inherit",
+              <div key={c.id} onClick={() => onOpenCase(c.id)} style={{
                 background: "#fff", border: `1px solid ${CARD_BORDER}`, borderLeft: `3px solid ${borderColor}`,
                 borderRadius: 8, padding: 16, display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
               }}>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 16, lineHeight: 1.3, color: TEXT_PRIMARY }}>{c.title}</span>
-                  <span style={{ display: "block", fontSize: 13, fontWeight: c.deadline.status === "none" ? 400 : 600, color: statusColor, marginTop: 3 }}>{c.deadline.label}</span>
-                </span>
-                <span aria-hidden="true" style={{ color: ICON_INACTIVE, fontSize: 20 }}>›</span>
-              </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 16, lineHeight: 1.3, color: TEXT_PRIMARY }}>{c.title}</div>
+                  <div style={{ fontSize: 13, fontWeight: c.deadline.status === "none" ? 400 : 600, color: statusColor, marginTop: 3 }}>{c.deadline.label}</div>
+                </div>
+                <span style={{ color: ICON_INACTIVE, fontSize: 20 }}>›</span>
+              </div>
             );
           })}
         </div>
@@ -2317,11 +1947,10 @@ function MobileCaseScreen({
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
   onEditNoteContent, onTogglePinNote, onCreateTaskFromNote, onAddNoteRich,
-  contracts, contractCaseIds, onEditContract, onLinkContract, onMoveTask, onOpenContract,
+  contracts, contractCaseIds, onEditContract, onLinkContract,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
-  const [wsTab, setWsTabState] = useState(() => readCaseTab(item.id, isConsultoria));
-  const setWsTab = (id) => { setWsTabState(id); saveCaseTab(item.id, id); };
+  const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
   const [taskView, setTaskView] = useState("lista");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
@@ -2332,23 +1961,21 @@ function MobileCaseScreen({
   const caseFinance = (finance || []).filter((f) => f.caseId === item.id);
   const caseExpenses = caseFinance.filter((f) => f.type === "Despesa");
   const casePayments = caseFinance.filter((f) => f.type === "Receita");
-  const linkedContractCount = (contracts || []).filter((c) => (contractCaseIds?.[c.id] || []).includes(item.id)).length;
-  const contactCount = (client ? 1 : 0) + (item.caseType === "Judicial" && judge ? 1 : 0);
 
   const TABS = isConsultoria ? [
     { id: "visao-geral", label: "Visão geral", count: 0 },
-    { id: "contrato", label: "Contrato", count: linkedContractCount },
+    { id: "contrato", label: "Contrato", count: 0 },
     { id: "tarefas", label: "Tarefas", count: openTaskCount },
     { id: "anotacoes", label: "Anotações", count: caseNotes.length },
     { id: "documentos", label: "Documentos", count: caseDocs.length },
     { id: "financeiro", label: "Financeiro", count: caseFinance.length },
-    { id: "contatos", label: "Contatos", count: contactCount },
+    { id: "contatos", label: "Contatos", count: 0 },
   ] : [
     { id: "tarefas", label: "Tarefas", count: openTaskCount },
     { id: "prazos", label: "Prazos", count: caseEvents.length },
     { id: "documentos", label: "Documentos", count: caseDocs.length },
     { id: "financeiro", label: "Financeiro", count: caseFinance.length },
-    { id: "contatos", label: "Contatos", count: contactCount },
+    { id: "contatos", label: "Contatos", count: 0 },
   ];
   const footerLabel = {
     "visao-geral": null, contrato: null,
@@ -2379,21 +2006,17 @@ function MobileCaseScreen({
             <CaseTypeTags types={caseTypes} catalog={caseTypesCatalog} onAdd={onAddCaseType} onRemove={onRemoveCaseType} />
           </div>
         )}
-        <div role="tablist" aria-label="Seções do caso" style={{ display: "flex", gap: 22, overflowX: "auto", paddingTop: 13, paddingBottom: 13, borderTop: "1px solid rgba(232,226,213,0.12)", whiteSpace: "nowrap" }}>
+        <div style={{ display: "flex", gap: 22, overflowX: "auto", paddingTop: 13, paddingBottom: 13, borderTop: "1px solid rgba(232,226,213,0.12)", whiteSpace: "nowrap" }}>
           {TABS.map((t) => {
             const active = wsTab === t.id;
             return (
-              <button key={t.id} type="button" role="tab" data-tab-id={t.id} aria-selected={active} tabIndex={active ? 0 : -1}
-                onClick={() => setWsTab(t.id)}
-                onKeyDown={(e) => handleTabKeyDown(e, TABS.map((x) => x.id), wsTab, setWsTab)}
-                style={{
-                background: "none", border: "none", fontFamily: "inherit", padding: "0 0 4px",
+              <div key={t.id} onClick={() => setWsTab(t.id)} style={{
                 fontSize: 15, cursor: "pointer", flexShrink: 0,
                 color: active ? "#f5efe4" : "rgba(240,234,221,0.65)", fontWeight: active ? 700 : 400,
-                borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
+                borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent", paddingBottom: 4,
               }}>
                 {t.label}{t.count > 0 ? ` ${t.count}` : ""}
-              </button>
+              </div>
             );
           })}
         </div>
@@ -2454,7 +2077,7 @@ function MobileCaseScreen({
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <h3 style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY, margin: 0 }}>Tarefas e compromissos</h3>
-                  <button type="button" onClick={() => setWsTab("tarefas")} style={{ ...BTN_RESET, fontSize: 12, color: NAVY }}>Ver todas</button>
+                  <span onClick={() => setWsTab("tarefas")} style={{ fontSize: 12, color: NAVY }}>Ver todas</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {nextTasks.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma tarefa neste caso.</p>}
@@ -2474,7 +2097,7 @@ function MobileCaseScreen({
               <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "14px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <h3 style={{ fontFamily: "Georgia, serif", fontSize: 14.5, color: NAVY, margin: 0 }}>Última anotação</h3>
-                  <button type="button" onClick={() => setWsTab("anotacoes")} style={{ ...BTN_RESET, fontSize: 11.5, color: NAVY }}>Ver {caseNotes.length}</button>
+                  <span onClick={() => setWsTab("anotacoes")} style={{ fontSize: 11.5, color: NAVY }}>Ver {caseNotes.length}</span>
                 </div>
                 {latestNote ? (
                   <>
@@ -2482,7 +2105,7 @@ function MobileCaseScreen({
                       <span style={{ fontSize: 10.5, fontWeight: 600, padding: "3px 8px", borderRadius: 20, background: noteTypeMeta(latestNote.type).bg, color: "#12283f" }}>{noteTypeMeta(latestNote.type).label}</span>
                       <span style={{ fontSize: 11.5, color: "#857d6c" }}>{fmtDateTime(latestNote.occurredAt || latestNote.date)}</span>
                     </div>
-                    <NoteBody text={latestNote.content} style={{ fontSize: 13, lineHeight: 1.5, color: INK }} />
+                    <p style={{ fontSize: 13, lineHeight: 1.5, color: INK, margin: 0 }}>{latestNote.content}</p>
                   </>
                 ) : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
               </div>
@@ -2517,7 +2140,7 @@ function MobileCaseScreen({
                 const status = deriveContractStatus(c);
                 const pill = CONTRACT_STATUS_META[status];
                 return (
-                  <div key={c.id} onClick={() => (onOpenContract ? onOpenContract(c) : onEditContract(c))} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px", cursor: "pointer" }}>
+                  <div key={c.id} onClick={() => onEditContract(c)} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px", cursor: "pointer" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
                         <div style={{ fontSize: 15, color: "#23201a", marginBottom: 4 }}>{c.title}</div>
@@ -2541,15 +2164,15 @@ function MobileCaseScreen({
           <div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 12 }}>
               {["semana", "lista"].map((v) => (
-                <button type="button" key={v} onClick={() => setTaskView(v)} style={{ ...BTN_RESET,
+                <span key={v} onClick={() => setTaskView(v)} style={{
                   fontSize: 12, padding: "5px 12px", borderRadius: 20, cursor: "pointer", textTransform: "capitalize",
                   background: taskView === v ? SIDEBAR_NAVY : "#fff", color: taskView === v ? "#EDE6D8" : NAVY,
                   border: taskView === v ? "none" : "1px solid #E3E0D6", fontWeight: taskView === v ? 600 : 400,
-                }}>{v}</button>
+                }}>{v}</span>
               ))}
             </div>
             {taskView === "semana" ? (
-              <CaseTasksWeekView tasks={caseTasks} onEditTask={onEditTask} onMoveTask={onMoveTask} />
+              <CaseTasksWeekView tasks={caseTasks} onEditTask={onEditTask} />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {caseTasks.length === 0 && <p style={{ fontSize: 15, color: TEXT_META, textAlign: "center", padding: "30px 0" }}>Nenhuma tarefa neste caso.</p>}
@@ -2713,7 +2336,7 @@ function MobileTasksScreen({ tasks, cases, onToggle, onDelete, onEdit, onOpenCas
               <TaskRow t={t} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} showDueInfo variant="card" checkboxSize={22} />
               <div style={{ marginLeft: 31, marginTop: 6 }}>
                 {c ? (
-                  <button type="button" onClick={() => onOpenCase(c.id)} style={{ ...BTN_RESET, fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>{c.title} ›</button>
+                  <span onClick={() => onOpenCase(c.id)} style={{ fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>{c.title} ›</span>
                 ) : (
                   <span style={{ fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>Vincular a um caso ›</span>
                 )}
@@ -2733,11 +2356,10 @@ function CaseWorkspace({
   onAddNote, onDeleteNote, onAddDoc, onDeleteDoc, onAddExpense, onAddPayment, onDeleteFinance,
   caseTypes, caseTypesCatalog, onAddCaseType, onRemoveCaseType,
   onEditNoteContent, onTogglePinNote, onCreateTaskFromNote, onAddNoteRich,
-  contracts, contractCaseIds, onEditContract, onLinkContract, onMoveTask, onOpenContract,
+  contracts, contractCaseIds, onEditContract, onLinkContract,
 }) {
   const isConsultoria = item.caseType === "Consultoria";
-  const [wsTab, setWsTabState] = useState(() => readCaseTab(item.id, isConsultoria));
-  const setWsTab = (id) => { setWsTabState(id); saveCaseTab(item.id, id); };
+  const [wsTab, setWsTab] = useState(isConsultoria ? "visao-geral" : "tarefas");
   const [taskView, setTaskView] = useState("lista");
   const judge = clients.find((c) => c.id === item.judgeId);
   const caseEvents = events.filter((e) => e.caseId === item.id).sort((a, b) => a.date.localeCompare(b.date));
@@ -2748,23 +2370,21 @@ function CaseWorkspace({
   const caseFinance = (finance || []).filter((f) => f.caseId === item.id);
   const caseExpenses = caseFinance.filter((f) => f.type === "Despesa");
   const casePayments = caseFinance.filter((f) => f.type === "Receita");
-  const linkedContractCount = (contracts || []).filter((c) => (contractCaseIds?.[c.id] || []).includes(item.id)).length;
-  const contactCount = (client ? 1 : 0) + (item.caseType === "Judicial" && judge ? 1 : 0);
 
   const TABS = isConsultoria ? [
     { id: "visao-geral", label: "Visão geral", count: 0 },
-    { id: "contrato", label: "Contrato", count: linkedContractCount },
+    { id: "contrato", label: "Contrato", count: 0 },
     { id: "tarefas", label: "Tarefas", count: openTaskCount },
     { id: "anotacoes", label: "Anotações", count: caseNotes.length },
     { id: "documentos", label: "Documentos", count: caseDocs.length },
     { id: "financeiro", label: "Financeiro", count: caseFinance.length },
-    { id: "contatos", label: "Contatos", count: contactCount },
+    { id: "contatos", label: "Contatos", count: 0 },
   ] : [
     { id: "tarefas", label: "Tarefas", count: openTaskCount },
     { id: "prazos", label: "Prazos", count: caseEvents.length },
     { id: "documentos", label: "Documentos", count: caseDocs.length },
     { id: "financeiro", label: "Financeiro", count: caseFinance.length },
-    { id: "contatos", label: "Contatos", count: contactCount },
+    { id: "contatos", label: "Contatos", count: 0 },
   ];
 
   const addLabel = {
@@ -2802,14 +2422,11 @@ function CaseWorkspace({
         </div>
       </div>
 
-      <div role="tablist" aria-label="Seções do caso" style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20, overflowX: "auto" }}>
+      <div style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20 }}>
         {TABS.map((t) => {
           const active = wsTab === t.id;
           return (
-            <button key={t.id} type="button" role="tab" data-tab-id={t.id} aria-selected={active} tabIndex={active ? 0 : -1}
-              onClick={() => setWsTab(t.id)}
-              onKeyDown={(e) => handleTabKeyDown(e, TABS.map((x) => x.id), wsTab, setWsTab)}
-              style={{ whiteSpace: "nowrap",
+            <button key={t.id} onClick={() => setWsTab(t.id)} style={{
               background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
               fontSize: 14, fontWeight: active ? 600 : 400, color: active ? SIDEBAR_NAVY : TEXT_SECONDARY,
               padding: "0 0 11px", borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
@@ -2868,7 +2485,7 @@ function CaseWorkspace({
                   ) : (
                     <>
                       <div style={{ fontSize: 14, color: "rgba(240,234,221,0.7)", marginBottom: 4 }}>nenhum compromisso agendado</div>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); onAddTask(); }} style={{ ...BTN_RESET, fontSize: 12, color: "#c9a227", cursor: "pointer" }}>Agendar</button>
+                      <span onClick={(e) => { e.stopPropagation(); onAddTask(); }} style={{ fontSize: 12, color: "#c9a227", cursor: "pointer" }}>Agendar</span>
                     </>
                   )}
                 </div>
@@ -2884,7 +2501,7 @@ function CaseWorkspace({
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <h3 style={{ fontFamily: "Georgia, serif", fontSize: 16, color: NAVY, margin: 0 }}>Tarefas e compromissos</h3>
-                  <button type="button" onClick={() => setWsTab("tarefas")} style={{ ...BTN_RESET, fontSize: 12.5, color: NAVY, cursor: "pointer" }}>Ver todas</button>
+                  <span onClick={() => setWsTab("tarefas")} style={{ fontSize: 12.5, color: NAVY, cursor: "pointer" }}>Ver todas</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {nextTasks.length === 0 && <p style={{ fontSize: 13, color: MUTED }}>Nenhuma tarefa neste caso.</p>}
@@ -2904,7 +2521,7 @@ function CaseWorkspace({
                 <div style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                     <h3 style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY, margin: 0 }}>Última anotação</h3>
-                    <button type="button" onClick={() => setWsTab("anotacoes")} style={{ ...BTN_RESET, fontSize: 12, color: NAVY, cursor: "pointer" }}>Ver {caseNotes.length}</button>
+                    <span onClick={() => setWsTab("anotacoes")} style={{ fontSize: 12, color: NAVY, cursor: "pointer" }}>Ver {caseNotes.length}</span>
                   </div>
                   {latestNote ? (
                     <>
@@ -2912,7 +2529,7 @@ function CaseWorkspace({
                         <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 20, background: noteTypeMeta(latestNote.type).bg, color: "#12283f" }}>{noteTypeMeta(latestNote.type).label}</span>
                         <span style={{ fontSize: 12, color: "#857d6c" }}>{fmtDateTime(latestNote.occurredAt || latestNote.date)} · {latestNote.authorName || "—"}</span>
                       </div>
-                      <NoteBody text={latestNote.content} style={{ fontSize: 14, lineHeight: 1.55, color: INK }} />
+                      <p style={{ fontSize: 14, lineHeight: 1.55, color: INK, margin: 0 }}>{latestNote.content}</p>
                     </>
                   ) : <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nenhuma anotação registrada.</p>}
                 </div>
@@ -2948,7 +2565,7 @@ function CaseWorkspace({
               const status = deriveContractStatus(c);
               const pill = CONTRACT_STATUS_META[status];
               return (
-                <div key={c.id} onClick={() => (onOpenContract ? onOpenContract(c) : onEditContract(c))} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "18px 20px", cursor: "pointer" }}>
+                <div key={c.id} onClick={() => onEditContract(c)} style={{ background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "18px 20px", cursor: "pointer" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
                       <div style={{ fontSize: 16, color: "#23201a", marginBottom: 4 }}>{c.title}</div>
@@ -2972,15 +2589,15 @@ function CaseWorkspace({
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 12 }}>
             {["semana", "lista"].map((v) => (
-              <button type="button" key={v} onClick={() => setTaskView(v)} style={{ ...BTN_RESET,
+              <span key={v} onClick={() => setTaskView(v)} style={{
                 fontSize: 12, padding: "5px 12px", borderRadius: 20, cursor: "pointer", textTransform: "capitalize",
                 background: taskView === v ? SIDEBAR_NAVY : "#fff", color: taskView === v ? "#EDE6D8" : NAVY,
                 border: taskView === v ? "none" : "1px solid #E3E0D6", fontWeight: taskView === v ? 600 : 400,
-              }}>{v}</button>
+              }}>{v}</span>
             ))}
           </div>
           {taskView === "semana" ? (
-            <CaseTasksWeekView tasks={caseTasks} onEditTask={onEditTask} onMoveTask={onMoveTask} />
+            <CaseTasksWeekView tasks={caseTasks} onEditTask={onEditTask} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {caseTasks.length === 0 && (
@@ -3382,15 +2999,7 @@ function DeadlinesTab({ tasks, cases, clients, onToggle, onDeleteTask, onEditTas
   );
 }
 
-const AGENDA_ORIGINS = [
-  { id: "Compromisso", label: "Compromissos", bg: "#EAF3DE", color: "#27500A" },
-  { id: "Tarefa", label: "Tarefas", bg: "#F1EFE8", color: "#6b6455" },
-  { id: "Prazo", label: "Prazos processuais", bg: "#FBE3DC", color: "#993D1D" },
-  { id: "Google", label: "Google Agenda", bg: "#E7EEF3", color: "#2A5A78" },
-];
-
-function AgendaTab({ tasks, events = [], cases = [], onOpenCase, onDeleteTask, onAddTask, onTokenAcquired, onSyncAll }) {
-  const [originFilter, setOriginFilter] = useState("todas");
+function AgendaTab({ tasks, onDeleteTask, onAddTask, onTokenAcquired, onSyncAll }) {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [googleConnected, setGoogleConnected] = useState(false);
@@ -3400,19 +3009,12 @@ function AgendaTab({ tasks, events = [], cases = [], onOpenCase, onDeleteTask, o
   const tokenRef = React.useRef(null);
   const tokenClientRef = React.useRef(null);
 
-  const caseById = {};
-  cases.forEach((c) => { caseById[c.id] = c; });
   const taskItems = tasks.filter((t) => t.dueDate).map((t) => ({
     kind: t.time ? "Compromisso" : "Tarefa", date: t.dueDate, id: t.id, title: t.title,
-    extra: t.time || "", location: t.location || "", done: t.done, googleSynced: t.googleSynced, caseId: t.caseId || null,
+    extra: t.time || "", location: t.location || "", done: t.done, googleSynced: t.googleSynced,
   }));
-  // Prazos processuais: eventos da timeline de casos contenciosos (consultoria não tem prazo processual)
-  const deadlineItems = events
-    .filter((ev) => ev.date && caseById[ev.caseId] && caseById[ev.caseId].caseType !== "Consultoria")
-    .map((ev) => ({ kind: "Prazo", date: ev.date, id: ev.id, title: ev.description, extra: "", location: "", done: false, caseId: ev.caseId }));
   const googleItems = googleEvents.map((g) => ({ kind: "Google", date: g.date, id: g.id, title: g.title, extra: g.time || "", location: "", done: false }));
-  const allItems = [...taskItems, ...deadlineItems, ...googleItems]
-    .filter((it) => originFilter === "todas" || it.kind === originFilter);
+  const allItems = [...taskItems, ...googleItems];
   const itemsByDate = {};
   allItems.forEach((it) => { (itemsByDate[it.date] = itemsByDate[it.date] || []).push(it); });
 
@@ -3470,7 +3072,7 @@ function AgendaTab({ tasks, events = [], cases = [], onOpenCase, onDeleteTask, o
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
         <div>
           <h1 style={{ fontFamily: "Georgia, serif", color: NAVY, fontSize: 24, margin: "0 0 4px" }}>Agenda</h1>
-          <p style={{ color: MUTED, fontSize: 13.5, margin: 0 }}>Compromissos, tarefas com data e prazos processuais.</p>
+          <p style={{ color: MUTED, fontSize: 13.5, margin: 0 }}>Compromissos e prazos de tarefas.</p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={connectGoogle} disabled={googleBusy} style={{
@@ -3488,20 +3090,6 @@ function AgendaTab({ tasks, events = [], cases = [], onOpenCase, onDeleteTask, o
           )}
           <AddButton onClick={onAddTask} />
         </div>
-      </div>
-
-      {/* Filtro por origem */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        {[{ id: "todas", label: "Todas" }, ...AGENDA_ORIGINS].map((o) => {
-          const active = originFilter === o.id;
-          return (
-            <button key={o.id} type="button" onClick={() => setOriginFilter(o.id)} aria-pressed={active} style={{
-              fontSize: 12.5, padding: "6px 12px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit",
-              background: active ? NAVY : "#fff", color: active ? "#EDE6D8" : NAVY,
-              border: active ? "1px solid transparent" : "1px solid #E3E0D6", fontWeight: active ? 600 : 400,
-            }}>{o.label}</button>
-          );
-        })}
       </div>
 
       {/* Semana */}
@@ -3557,20 +3145,17 @@ function AgendaTab({ tasks, events = [], cases = [], onOpenCase, onDeleteTask, o
       {/* Dia selecionado */}
       <SectionCard title={fmtDate(selectedDate)}>
         {dayItems.length === 0 && <p style={{ fontSize: 13, color: MUTED, margin: 0 }}>Nada agendado para este dia.</p>}
-        {dayItems.map((it) => {
-          const meta = AGENDA_ORIGINS.find((o) => o.id === it.kind) || AGENDA_ORIGINS[1];
-          const linkedCase = it.caseId ? caseById[it.caseId] : null;
-          return (
-            <RowCard key={`${it.kind}-${it.id}`}
-              onClick={linkedCase && onOpenCase ? () => onOpenCase(linkedCase.id) : undefined}
-              onDelete={it.kind === "Compromisso" || it.kind === "Tarefa" ? () => onDeleteTask(it.id) : undefined}
-              title={it.title}
-              subtitle={`${it.extra || "dia todo"}${it.location ? " · " + it.location : ""}${it.done ? " · concluída" : ""}${linkedCase ? ` · ${linkedCase.title} ›` : ""}`}
-              right={<span style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 12, background: meta.bg, color: meta.color }}>
-                {it.kind === "Prazo" ? "Prazo processual" : it.kind}
-              </span>} />
-          );
-        })}
+        {dayItems.map((it) => (
+          <RowCard key={`${it.kind}-${it.id}`}
+            onDelete={it.kind === "Google" ? undefined : () => onDeleteTask(it.id)}
+            title={it.title}
+            subtitle={`${it.extra || "dia todo"}${it.location ? " · " + it.location : ""}${it.done ? " · concluída" : ""}`}
+            right={<span style={{
+              fontSize: 10.5, padding: "2px 8px", borderRadius: 12,
+              background: it.kind === "Tarefa" ? "#F1EFE8" : it.kind === "Google" ? "#E7EEF3" : "#EAF3DE",
+              color: it.kind === "Tarefa" ? MUTED : it.kind === "Google" ? "#2A5A78" : "#27500A",
+            }}>{it.kind}</span>} />
+        ))}
       </SectionCard>
     </>
   );
@@ -3788,9 +3373,9 @@ function FinanceTab({ finance, clients, cases, onAdd, onEdit, onDelete, clientNa
                 </div>
                 <div style={{ width: 150, flexShrink: 0 }}>
                   {c ? (
-                    <button type="button" onClick={() => onOpenCase(c.id)} style={{ ...BTN_RESET, fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>{c.title} ›</button>
+                    <span onClick={() => onOpenCase(c.id)} style={{ fontSize: 13, color: GOLD_DARK, cursor: "pointer" }}>{c.title} ›</span>
                   ) : (
-                    <button type="button" onClick={() => onEdit(f)} style={{ ...BTN_RESET, fontSize: 13, color: TEXT_META, cursor: "pointer" }}>Vincular a um caso</button>
+                    <span onClick={() => onEdit(f)} style={{ fontSize: 13, color: TEXT_META, cursor: "pointer" }}>Vincular a um caso</span>
                   )}
                 </div>
                 <div style={{ width: 110, flexShrink: 0 }}>
@@ -3819,160 +3404,7 @@ const CONTRACT_STATUS_META = {
   ended: { bg: "#f1ede2", color: "#857d6c", label: "encerrado" },
 };
 
-// --- Detalhe do contrato: reaproveita o padrão de workspace (cabeçalho + abas) ---
-function ContractDetail({ contract, status, caseIds, types, cases, clients, tasks, documents, finance, onBack, onEdit, onToggleSuspend, onOpenCase }) {
-  const [cTab, setCTab] = useState("resumo");
-  const client = clients.find((cl) => cl.id === contract.clientId);
-  const linkedCases = cases.filter((cs) => caseIds.includes(cs.id));
-  const caseTitle = (id) => cases.find((cs) => cs.id === id)?.title || "—";
-  const obligations = (tasks || []).filter((t) => caseIds.includes(t.caseId))
-    .sort((a, b) => {
-      if (a.done !== b.done) return a.done ? 1 : -1;
-      return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
-    });
-  const docs = (documents || []).filter((d) => caseIds.includes(d.caseId));
-  const entries = (finance || []).filter((f) => caseIds.includes(f.caseId)).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const received = entries.filter((f) => f.type === "Receita" && f.settledAt).reduce((sum, f) => sum + Number(f.amount || 0), 0);
-  const receivable = entries.filter((f) => f.type === "Receita" && !f.settledAt).reduce((sum, f) => sum + Number(f.amount || 0), 0);
-  const pill = CONTRACT_STATUS_META[status];
-  const pct = contractVigenciaPct(contract, status);
-  const openObligations = obligations.filter((t) => !t.done).length;
-  const TABS = [
-    { id: "resumo", label: "Resumo", count: 0 },
-    { id: "obrigacoes", label: "Obrigações", count: openObligations },
-    { id: "documentos", label: "Documentos", count: docs.length },
-    { id: "financeiro", label: "Financeiro", count: entries.length },
-  ];
-  const card = { background: "#fff", border: "1px solid #e6e0d2", borderRadius: 8, padding: "16px 18px" };
-  const label = { fontSize: 11, letterSpacing: "0.1em", color: "#857d6c", textTransform: "uppercase", marginBottom: 6, fontWeight: 600 };
-
-  return (
-    <div>
-      <button type="button" onClick={onBack} style={{ background: "none", border: "none", color: NAVY, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14, fontFamily: "inherit" }}>← Contratos</button>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, marginBottom: 18, flexWrap: "wrap" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.12em", fontWeight: 600, color: GOLD_DARK, marginBottom: 6 }}>CONTRATO</div>
-          <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 600, fontSize: 30, lineHeight: 1.15, color: SIDEBAR_NAVY, margin: 0 }}>{contract.title}</h1>
-          <div style={{ fontSize: 13, color: "#857d6c", marginTop: 8 }}>{client?.name || "sem cliente"}</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: pill.bg, color: pill.color }}>{pill.label}</span>
-            {types.map((t) => <span key={t.id} style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: t.bg, border: `1px solid ${t.border}`, color: "#12283f" }}>{t.name}</span>)}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          <button type="button" onClick={() => onToggleSuspend(contract)} style={{ background: "#fff", border: "1px solid #ddd6c8", color: SIDEBAR_NAVY, fontSize: 13, fontWeight: 600, padding: "10px 14px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>{status === "suspended" ? "Reativar" : "Suspender"}</button>
-          <button type="button" onClick={() => onEdit(contract)} style={{ background: SIDEBAR_NAVY, color: "#f5efe4", border: "none", fontSize: 14, fontWeight: 600, padding: "11px 18px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>Editar</button>
-        </div>
-      </div>
-
-      <div role="tablist" aria-label="Seções do contrato" style={{ display: "flex", gap: 26, borderBottom: `1px solid ${DIVIDER}`, marginBottom: 20, overflowX: "auto" }}>
-        {TABS.map((t) => {
-          const active = cTab === t.id;
-          return (
-            <button key={t.id} role="tab" data-tab-id={t.id} aria-selected={active} tabIndex={active ? 0 : -1} type="button"
-              onClick={() => setCTab(t.id)} onKeyDown={(e) => handleTabKeyDown(e, TABS.map((x) => x.id), cTab, setCTab)} style={{
-              background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-              fontSize: 14, fontWeight: active ? 600 : 400, color: active ? SIDEBAR_NAVY : TEXT_SECONDARY,
-              padding: "0 0 11px", borderBottom: active ? `2px solid ${GOLD_ACCENT}` : "2px solid transparent",
-              display: "flex", alignItems: "center", gap: 6,
-            }}>
-              {t.label}
-              {t.count > 0 && <span style={{ fontSize: 12, color: TEXT_META }}>{t.count}</span>}
-            </button>
-          );
-        })}
-      </div>
-
-      {cTab === "resumo" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
-          <div style={card}>
-            <div style={label}>Vigência</div>
-            <div style={{ fontSize: 14, color: "#23201a", marginBottom: 8 }}>{fmtDate(contract.startDate)} → {contract.endDate ? fmtDate(contract.endDate) : "prazo indeterminado"}</div>
-            <div style={{ height: 6, borderRadius: 3, background: "#ece7da", overflow: "hidden", marginBottom: 6 }}>
-              {status === "suspended" ? <div style={{ width: "100%", height: "100%", background: "#b8b0a0" }} />
-                : !contract.endDate ? <div style={{ width: "100%", height: "100%", background: "repeating-linear-gradient(45deg, #e2d7b8 0 5px, #ece7da 5px 10px)" }} />
-                : <div style={{ width: `${pct}%`, height: "100%", background: status === "expiring" ? "#c04a40" : "#c9a227" }} />}
-            </div>
-            <div style={{ fontSize: 12.5, color: status === "expiring" ? "#c04a40" : "#857d6c", fontWeight: status === "expiring" ? 600 : 400 }}>{contractVigenciaLabel(contract, status)}</div>
-            <div style={{ fontSize: 12.5, color: "#6b6455", marginTop: 8 }}>{contract.autoRenew ? "Renova automaticamente" : "Não renova automaticamente"}</div>
-          </div>
-          <div style={card}>
-            <div style={label}>Honorários</div>
-            <div style={{ fontFamily: "Georgia, serif", fontSize: 26, color: status === "suspended" ? "#857d6c" : "#23201a" }}>
-              {status === "suspended" ? "R$ 0" : fmtBRL(contract.monthlyFee)}<span style={{ fontSize: 13, color: "#857d6c" }}>/mês</span>
-            </div>
-            <div style={{ fontSize: 12.5, color: contract.successFeeLabel ? "#8a6d3b" : "#857d6c", marginTop: 4 }}>
-              {status === "suspended" ? "cobrança pausada" : (contract.successFeeLabel || "sem êxito")}
-            </div>
-          </div>
-          <div style={card}>
-            <div style={label}>Casos vinculados</div>
-            {linkedCases.length === 0 && <p style={{ fontSize: 13, color: "#857d6c", margin: 0 }}>Nenhum caso vinculado.</p>}
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {linkedCases.map((cs) => (
-                <a key={cs.id} href="#" onClick={(e) => { e.preventDefault(); onOpenCase(cs.id); }} style={{ fontSize: 13.5, color: NAVY }}>
-                  {cs.number ? `${cs.number} · ` : ""}{cs.title} ›
-                </a>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {cTab === "obrigacoes" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <p style={{ fontSize: 12.5, color: "#857d6c", margin: "0 0 4px" }}>Tarefas dos casos cobertos por este contrato.</p>
-          {obligations.length === 0 && <Empty text={linkedCases.length ? "Nenhuma tarefa nos casos vinculados." : "Vincule um caso ao contrato para acompanhar as obrigações."} />}
-          {obligations.map((t) => (
-            <div key={t.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, opacity: t.done ? 0.72 : 1 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 14, color: "#23201a", textDecoration: t.done ? "line-through" : "none" }}>{t.title}</div>
-                <div style={{ fontSize: 12, color: "#857d6c", marginTop: 3 }}>
-                  {t.dueDate ? `${fmtDate(t.dueDate)}${t.time ? `, ${t.time}` : ""}` : "sem data"} · {caseTitle(t.caseId)}
-                </div>
-              </div>
-              <a href="#" onClick={(e) => { e.preventDefault(); onOpenCase(t.caseId); }} style={{ fontSize: 12.5, color: NAVY, whiteSpace: "nowrap" }}>Abrir caso ›</a>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {cTab === "documentos" && (
-        <div style={card}>
-          {docs.length === 0 && <p style={{ fontSize: 13, color: "#857d6c", margin: 0 }}>Nenhum documento nos casos vinculados.</p>}
-          {docs.map((d) => (
-            <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: "1px solid #F1EFE8", gap: 12 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, color: INK }}>{d.name}</div>
-                <div style={{ fontSize: 12, color: "#857d6c" }}>{caseTitle(d.caseId)}</div>
-              </div>
-              {d.driveLink && <a href={d.driveLink} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: NAVY, whiteSpace: "nowrap" }}>Abrir no Drive ↗</a>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {cTab === "financeiro" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13, color: "#6b6455" }}>
-            <span>Recebido: <strong style={{ color: "#27500A" }}>{fmtBRL(received)}</strong></span>
-            <span>A receber: <strong style={{ color: NAVY }}>{fmtBRL(receivable)}</strong></span>
-          </div>
-          {entries.length === 0 && <Empty text="Nenhum lançamento nos casos vinculados." />}
-          {entries.map((f) => (
-            <RowCard key={f.id} title={f.description} subtitle={`${fmtDate(f.date)} · ${caseTitle(f.caseId)}${f.settledAt ? (f.type === "Despesa" ? " · pago" : " · recebido") : ""}`}
-              right={<span style={{ color: f.type === "Despesa" ? "#993D1D" : "#27500A", fontSize: 13.5, fontWeight: 500 }}>{f.type === "Despesa" ? "-" : "+"}{fmtBRL(f.amount)}</span>} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, cases, clients, caseTypesCatalog, tasks, documents, finance, onAdd, onEdit, onDelete, onToggleSuspend, onOpenCase, detailId: controlledDetailId, onDetailChange }) {
-  const [localDetailId, setLocalDetailId] = useState(null);
-  const detailId = onDetailChange ? controlledDetailId : localDetailId;
-  const setDetailId = onDetailChange || setLocalDetailId;
+function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, cases, clients, caseTypesCatalog, onAdd, onEdit, onDelete, onToggleSuspend, onOpenCase }) {
   const [statusFilter, setStatusFilter] = useState("active");
   const [typeFilter, setTypeFilter] = useState("todos");
   const [search, setSearch] = useState("");
@@ -4011,15 +3443,6 @@ function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, 
     { id: "suspended", label: "Suspensos" }, { id: "ended", label: "Encerrados" },
   ];
 
-  const detail = detailId ? enriched.find((c) => c.id === detailId) : null;
-  if (detail) {
-    return (
-      <ContractDetail contract={detail} status={detail.status} caseIds={detail.caseIds} types={detail.types}
-        cases={cases} clients={clients} tasks={tasks} documents={documents} finance={finance}
-        onBack={() => setDetailId(null)} onEdit={onEdit} onToggleSuspend={onToggleSuspend} onOpenCase={onOpenCase} />
-    );
-  }
-
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
@@ -4054,11 +3477,11 @@ function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, 
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
         {FILTERS.map((f) => (
-          <button type="button" key={f.id} onClick={() => setStatusFilter(f.id)} style={{ ...BTN_RESET,
+          <span key={f.id} onClick={() => setStatusFilter(f.id)} style={{
             fontSize: 13, padding: "7px 14px", borderRadius: 20, cursor: "pointer",
             background: statusFilter === f.id ? SIDEBAR_NAVY : "#fff", color: statusFilter === f.id ? "#EDE6D8" : NAVY,
             border: statusFilter === f.id ? "none" : "1px solid #E3E0D6", fontWeight: statusFilter === f.id ? 600 : 400,
-          }}>{f.label} · {counts[f.id]}</button>
+          }}>{f.label} · {counts[f.id]}</span>
         ))}
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ marginLeft: "auto", border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 10px", fontSize: 13 }}>
           <option value="todos">Tipo: todos</option>
@@ -4076,7 +3499,7 @@ function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, 
           const borderTint = c.status === "active" ? "#c9a227" : c.status === "expiring" ? "#c04a40" : "transparent";
           const pill = CONTRACT_STATUS_META[c.status];
           return (
-            <div key={c.id} onClick={() => setDetailId(c.id)} style={{
+            <div key={c.id} onClick={() => onEdit(c)} style={{
               background: "#fff", border: "1px solid #e6e0d2", borderLeft: `3px solid ${borderTint}`,
               borderRadius: 8, padding: "18px 20px", display: "flex", gap: 20, alignItems: "center",
               cursor: "pointer", opacity: (c.status === "suspended" || c.status === "ended") ? 0.78 : 1, flexWrap: "wrap",
@@ -4086,7 +3509,7 @@ function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, 
                 <div style={{ fontSize: 13, color: "#857d6c", marginBottom: 6 }}>
                   {client?.name || "—"}
                   {linkedCase
-                    ? <> · <button type="button" onClick={(e) => { e.stopPropagation(); onOpenCase(linkedCase.id); }} style={{ ...BTN_RESET, color: NAVY, textDecoration: "underline", cursor: "pointer" }}>caso {linkedCase.number || linkedCase.title}{linkedCase.tribunal ? ` (${linkedCase.tribunal})` : ""} ›</button></>
+                    ? <> · <span onClick={(e) => { e.stopPropagation(); onOpenCase(linkedCase.id); }} style={{ color: NAVY, textDecoration: "underline", cursor: "pointer" }}>caso {linkedCase.number || linkedCase.title}{linkedCase.tribunal ? ` (${linkedCase.tribunal})` : ""} ›</span></>
                     : " · sem caso vinculado"}
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -4127,8 +3550,8 @@ function ContractsPage({ contracts, contractCaseIds, contractTypesByContractId, 
                 <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 20, background: pill.bg, color: pill.color }}>{pill.label}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }} onClick={(e) => e.stopPropagation()}>
-                <button type="button" onClick={() => onToggleSuspend(c)} style={{ ...BTN_RESET, fontSize: 11.5, color: NAVY, cursor: "pointer" }}>{c.status === "suspended" ? "Reativar" : "Suspender"}</button>
-                <button type="button" onClick={() => onDelete(c.id)} style={{ ...BTN_RESET, fontSize: 11.5, color: "#a5532f", cursor: "pointer" }}>Excluir</button>
+                <span onClick={() => onToggleSuspend(c)} style={{ fontSize: 11.5, color: NAVY, cursor: "pointer" }}>{c.status === "suspended" ? "Reativar" : "Suspender"}</span>
+                <span onClick={() => onDelete(c.id)} style={{ fontSize: 11.5, color: "#C0997B", cursor: "pointer" }}>Excluir</span>
               </div>
             </div>
           );
@@ -4415,7 +3838,7 @@ ${q.notes ? `<div class="avoid"><h2>Observações</h2><div>${esc(q.notes)}</div>
 
 function printQuote(q, recipient) {
   const w = window.open("", "_blank");
-  if (!w) { notifyError("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente."); return; }
+  if (!w) { alert("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente."); return; }
   w.document.open();
   w.document.write(quotePrintHTML(q, recipient));
   w.document.close();
@@ -4481,9 +3904,9 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
   }));
 
   const submit = async () => {
-    if (!draft.title.trim()) { notifyError("Informe o objeto da proposta (ex.: Ação de repetição de indébito)."); return; }
-    if (!draft.clientId && !draft.prospectName.trim()) { notifyError("Selecione um cliente ou informe o nome do destinatário."); return; }
-    if (draft.items.length === 0) { notifyError("Adicione ao menos um serviço."); return; }
+    if (!draft.title.trim()) { alert("Informe o objeto da proposta (ex.: Ação de repetição de indébito)."); return; }
+    if (!draft.clientId && !draft.prospectName.trim()) { alert("Selecione um cliente ou informe o nome do destinatário."); return; }
+    if (draft.items.length === 0) { alert("Adicione ao menos um serviço."); return; }
     setSaving(true);
     await onSave({ ...draft, clientId: draft.clientId || null }, draft.id);
     setSaving(false);
@@ -4493,8 +3916,7 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
   const doCopy = async () => {
     const ok = await copyText(quoteToText(draft, recipientOf(draft).name));
     setCopied(ok);
-    if (!ok) notifyError("Não foi possível copiar automaticamente. Tente novamente.");
-    else notify("Copiado.", { tone: "success", duration: 2500 });
+    if (!ok) alert("Não foi possível copiar automaticamente. Tente novamente.");
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -4672,11 +4094,11 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
         {FILTERS.map((f) => (
-          <button type="button" key={f.id} onClick={() => setStatusFilter(f.id)} style={{ ...BTN_RESET,
+          <span key={f.id} onClick={() => setStatusFilter(f.id)} style={{
             fontSize: 13, padding: "7px 14px", borderRadius: 20, cursor: "pointer",
             background: statusFilter === f.id ? NAVY : "#fff", color: statusFilter === f.id ? "#EDE6D8" : NAVY,
             border: statusFilter === f.id ? "none" : "1px solid #E3E0D6", fontWeight: statusFilter === f.id ? 600 : 400,
-          }}>{f.label} · {f.count}</button>
+          }}>{f.label} · {f.count}</span>
         ))}
       </div>
 
@@ -4702,7 +4124,7 @@ function QuotesPage({ quotes, clients, onSave, onDelete, onSetStatus }) {
                 <select value={q.status} onChange={(e) => onSetStatus(q.id, e.target.value)} style={{ border: "none", borderRadius: 20, padding: "5px 10px", fontSize: 12, fontWeight: 600, background: st.bg, color: st.color, cursor: "pointer" }}>
                   {Object.keys(QUOTE_STATUS).map((s) => <option key={s} value={s}>{QUOTE_STATUS[s].label}</option>)}
                 </select>
-                <button type="button" onClick={async () => { if (await confirmToast(`Excluir o orçamento ${q.number}? Essa ação não pode ser desfeita.`, "Excluir")) onDelete(q.id); }} style={{ background: "none", border: "none", padding: 0, fontFamily: "inherit", fontSize: 11.5, color: "#a5532f", cursor: "pointer" }}>Excluir</button>
+                <span onClick={() => { if (window.confirm(`Excluir o orçamento ${q.number}?`)) onDelete(q.id); }} style={{ fontSize: 11.5, color: "#C0997B", cursor: "pointer" }}>Excluir</span>
               </div>
             </div>
           );
@@ -5217,7 +4639,7 @@ function ClientPortalView({ data, onExit }) {
   );
 }
 
-export default function RSACApp() {
+function RSACApp({ onBackToSite }) {
   const [session, setSession] = useState(undefined);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
@@ -5252,8 +4674,6 @@ export default function RSACApp() {
   const [taskDayFilter, setTaskDayFilter] = useState(null);
   const [googleToken, setGoogleToken] = useState(null);
   const [expandedCaseClient, setExpandedCaseClient] = useState(null);
-  const [contractDetailId, setContractDetailId] = useState(null);
-  const [caseTypeFilter, setCaseTypeFilter] = useState("todos");
   const [viewCase, setViewCase] = useState(null);
   const [role, setRole] = useState(null);
   const roleRef = useRef(null);
@@ -5302,7 +4722,7 @@ export default function RSACApp() {
         profile = fb.data;
       } else if (!profile || profile.active === false) {
         await supabase.auth.signOut();
-        notifyError("Seu acesso está desativado ou não foi liberado. Fale com o administrador do escritório.");
+        alert("Seu acesso está desativado ou não foi liberado. Fale com o administrador do escritório.");
         return;
       }
       const r = profile?.role || "staff";
@@ -5371,10 +4791,8 @@ export default function RSACApp() {
 
   const handleToggleSuspendContract = useCallback(async (contract) => {
     const nextSuspended = contract.suspendedSince ? null : todayISO();
-    const ok = await updateRow("contracts", contract.id, { suspended_since: nextSuspended });
-    if (!ok) return;
+    await updateRow("contracts", contract.id, { suspended_since: nextSuspended });
     setContracts((prev) => prev.map((c) => (c.id === contract.id ? { ...c, suspendedSince: nextSuspended } : c)));
-    notify(nextSuspended ? "Contrato suspenso — cobrança pausada." : "Contrato reativado.", { tone: "success" });
   }, []);
 
   const handleDeleteContract = useCallback(async (id) => {
@@ -5385,13 +4803,13 @@ export default function RSACApp() {
 
   const handleSaveQuote = useCallback(async (values, id) => {
     if (id) {
-      const saved = await editRow("quotes", id, values, { quiet: true });
-      if (saved) { setQuotes((prev) => prev.map((q) => (q.id === id ? saved : q))); notify("Orçamento salvo.", { tone: "success" }); }
-      else notifyError("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
+      const saved = await editRow("quotes", id, values);
+      if (saved) setQuotes((prev) => prev.map((q) => (q.id === id ? saved : q)));
+      else alert("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
     } else {
-      const saved = await insertRow("quotes", values, { quiet: true });
-      if (saved) { setQuotes((prev) => [saved, ...prev]); notify("Orçamento salvo.", { tone: "success" }); }
-      else notifyError("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
+      const saved = await insertRow("quotes", values);
+      if (saved) setQuotes((prev) => [saved, ...prev]);
+      else alert("Não foi possível salvar o orçamento. Confira se o SQL da tabela 'quotes' foi executado no Supabase.");
     }
   }, []);
 
@@ -5401,10 +4819,9 @@ export default function RSACApp() {
   }, []);
 
   const handleDeleteQuote = useCallback(async (id) => {
-    if (roleRef.current !== "admin") { notifyError("Apenas o administrador pode excluir registros."); return; }
-    const ok = await deleteRow("quotes", id);
-    if (ok) setQuotes((prev) => prev.filter((q) => q.id !== id));
-    else notifyError("Não foi possível excluir o orçamento.");
+    if (roleRef.current !== "admin") { alert("Apenas o administrador pode excluir registros."); return; }
+    await deleteRow("quotes", id);
+    setQuotes((prev) => prev.filter((q) => q.id !== id));
   }, []);
 
   const handleAddNote = useCallback(async (caseId, values) => {
@@ -5415,23 +4832,16 @@ export default function RSACApp() {
   const handleEditNoteContent = useCallback(async (noteId, patch) => {
     const current = notes.find((n) => n.id === noteId);
     if (!current) return;
-    if (current.authorId && current.authorId !== session?.user?.id) { notifyError("Só o autor pode editar esta anotação."); return; }
     const merged = { ...current, ...patch, updatedAt: new Date().toISOString() };
     const saved = await editRow("notes", noteId, merged);
     if (saved) setNotes((prev) => prev.map((n) => (n.id === noteId ? saved : n)));
-  }, [notes, session]);
-
-  const deleteNote = useCallback((noteId) => {
-    const n = notes.find((x) => x.id === noteId);
-    if (n?.authorId && n.authorId !== session?.user?.id) { notifyError("Só o autor pode apagar esta anotação."); return; }
-    removeRow("notes", noteId);
-  }, [notes, session]);
+  }, [notes]);
 
   const handleTogglePinNote = useCallback(async (note) => {
     const otherPinned = notes.find((n) => n.caseId === note.caseId && n.pinned && n.id !== note.id);
     const nextPinned = !note.pinned;
-    if (otherPinned && !(await updateRow("notes", otherPinned.id, { pinned: false }))) return;
-    if (!(await updateRow("notes", note.id, { pinned: nextPinned }))) return;
+    if (otherPinned) await updateRow("notes", otherPinned.id, { pinned: false });
+    await updateRow("notes", note.id, { pinned: nextPinned });
     setNotes((prev) => prev.map((n) => {
       if (n.id === note.id) return { ...n, pinned: nextPinned };
       if (otherPinned && n.id === otherPinned.id) return { ...n, pinned: false };
@@ -5439,89 +4849,45 @@ export default function RSACApp() {
     }));
   }, [notes]);
 
-  // Trecho selecionado numa anotação → tarefa, compromisso (exige data e hora) ou documento do caso
-  const handleCreateTaskFromNote = useCallback((note, selectedText, kind = "task") => {
+  const handleCreateTaskFromNote = useCallback((note, selectedText) => {
     setFolderCaseId(note.caseId);
-    if (kind === "document") {
-      setTaskPrefill({ docName: selectedText });
-      setModal("document");
-      return;
-    }
-    setTaskPrefill({ title: selectedText, sourceNoteId: note.id, asAppointment: kind === "appointment" });
+    setTaskPrefill({ title: selectedText, sourceNoteId: note.id });
     setModal("task");
-  }, []);
-
-  // --- Sincronia tarefa ↔ Google Agenda ---
-  // Regra: compromisso (data + hora) e não concluído → existe no Google; concluído com data futura ou sem hora → sai do Google.
-  const googleTokenRef = useRef(null);
-  googleTokenRef.current = googleToken;
-  const tasksRef = useRef([]);
-  tasksRef.current = tasks;
-
-  const syncTaskWithGoogle = useCallback(async (task, { silent = true } = {}) => {
-    const token = googleTokenRef.current;
-    const wantsEvent = !!(task.time && task.dueDate) && !(task.done && task.dueDate >= todayISO());
-    const appt = { title: task.title, date: task.dueDate, time: task.time, location: task.location, reminder: task.reminder };
-    let patch = null;
-    if (!token) {
-      // Sem conexão com o Google nesta sessão: marca como pendente para o "Sincronizar todos"
-      if (wantsEvent && task.googleSynced) patch = { googleSynced: false };
-    } else if (!wantsEvent) {
-      if (task.googleEventId && await deleteGoogleEvent(token, task.googleEventId)) patch = { googleEventId: null, googleSynced: false };
-    } else if (task.googleEventId) {
-      const r = await updateGoogleEvent(token, task.googleEventId, appt);
-      if (r === "ok") patch = task.googleSynced ? null : { googleSynced: true };
-      else if (r === "gone") {
-        const newId = await pushEventToGoogle(token, appt, silent);
-        patch = newId ? { googleEventId: newId, googleSynced: true } : { googleEventId: null, googleSynced: false };
-      } else patch = { googleSynced: false };
-    } else {
-      const newId = await pushEventToGoogle(token, appt, silent);
-      if (newId) patch = { googleEventId: newId, googleSynced: true };
-    }
-    if (!patch) return task;
-    const next = { ...task, ...patch };
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t)));
-    const persisted = {};
-    if ("googleSynced" in patch) persisted.google_synced = patch.googleSynced;
-    if ("googleEventId" in patch) persisted.google_event_id = patch.googleEventId;
-    await updateRow("tasks", task.id, persisted, { quiet: true });
-    return next;
   }, []);
 
   const addTaskWithSync = useCallback(async (values) => {
     const saved = await insertRow("tasks", values);
     if (!saved) return;
     setTasks((prev) => [...prev, saved]);
-    if (saved.time && googleTokenRef.current) await syncTaskWithGoogle(saved, { silent: false });
-  }, [syncTaskWithGoogle]);
+    if (saved.time && googleToken) {
+      const ok = await pushEventToGoogle(googleToken, { title: saved.title, date: saved.dueDate, time: saved.time, location: saved.location });
+      if (ok) {
+        const updated = await editRow("tasks", saved.id, { ...saved, googleSynced: true });
+        if (updated) setTasks((prev) => prev.map((t) => t.id === saved.id ? updated : t));
+      }
+    }
+  }, [googleToken]);
 
   const syncAllTasks = useCallback(async () => {
     if (!googleToken) return { total: 0, ok: 0 };
-    const pending = tasks.filter((t) => t.time && t.dueDate && !t.googleSynced && !(t.done && t.dueDate >= todayISO()));
+    const pending = tasks.filter((t) => t.time && !t.googleSynced);
     let okCount = 0;
     for (const t of pending) {
-      const result = await syncTaskWithGoogle(t);
-      if (result.googleSynced) okCount++;
+      const ok = await pushEventToGoogle(googleToken, { title: t.title, date: t.dueDate, time: t.time, location: t.location }, true);
+      if (ok) {
+        okCount++;
+        const updated = await editRow("tasks", t.id, { ...t, googleSynced: true });
+        if (updated) setTasks((prev) => prev.map((x) => x.id === t.id ? updated : x));
+      }
     }
-    notify(`Sincronização concluída: ${okCount} de ${pending.length} compromisso(s) enviados ao Google Agenda.`, { tone: okCount === pending.length ? "success" : "error" });
+    alert(`Sincronização concluída: ${okCount} de ${pending.length} compromisso(s) enviados ao Google Agenda.`);
     return { total: pending.length, ok: okCount };
-  }, [googleToken, tasks, syncTaskWithGoogle]);
+  }, [googleToken, tasks]);
 
   const removeRow = useCallback(async (key, id) => {
-    if (roleRef.current !== "admin") { notifyError("Apenas o administrador pode excluir registros."); return; }
-    let removed = null;
-    if (key === "tasks") {
-      // Excluir a tarefa também tira o compromisso do Google Agenda (quando conectado)
-      const t = tasksRef.current.find((x) => x.id === id);
-      if (t?.googleEventId && googleTokenRef.current) await deleteGoogleEvent(googleTokenRef.current, t.googleEventId);
-    }
-    setters[key]((prev) => { removed = prev.find((r) => r.id === id) || null; return prev.filter((r) => r.id !== id); });
-    const ok = await deleteRow(key, id);
-    if (!ok) {
-      if (removed) setters[key]((prev) => (prev.some((r) => r.id === id) ? prev : [...prev, removed]));
-      notifyError("Não foi possível excluir. O registro foi mantido.");
-    }
+    if (roleRef.current !== "admin") { alert("Apenas o administrador pode excluir registros."); return; }
+    setters[key]((prev) => prev.filter((r) => r.id !== id));
+    await deleteRow(key, id);
   }, []);
 
   const editClientRow = useCallback(async (id, values) => {
@@ -5541,27 +4907,9 @@ export default function RSACApp() {
   }, []);
 
   const editTaskRow = useCallback(async (id, values) => {
-    // O formulário não traz os campos de sincronia — preserva os atuais para não perder o vínculo com o Google
-    const current = tasksRef.current.find((t) => t.id === id) || {};
-    const updated = await editRow("tasks", id, { ...current, ...values });
-    if (!updated) return;
-    setTasks((prev) => prev.map((t) => t.id === id ? updated : t));
-    const relevant = ["title", "dueDate", "time", "location", "reminder"].some((k) => (current[k] || null) !== (updated[k] || null));
-    if (relevant || (updated.time && !updated.googleSynced)) await syncTaskWithGoogle(updated);
-  }, [syncTaskWithGoogle]);
-
-  // Arrastar na semana do caso: muda a data da tarefa (atualização otimista; reverte se falhar)
-  const moveTaskToDate = useCallback(async (task, newDate) => {
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, dueDate: newDate } : t)));
-    const updated = await editRow("tasks", task.id, { ...task, dueDate: newDate }, { quiet: true });
-    if (updated) {
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
-      await syncTaskWithGoogle(updated);
-    } else {
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
-      notifyError("Não foi possível mudar a data da tarefa. Ela voltou para o dia original.");
-    }
-  }, [syncTaskWithGoogle]);
+    const updated = await editRow("tasks", id, values);
+    if (updated) setTasks((prev) => prev.map((t) => t.id === id ? updated : t));
+  }, []);
 
   const editFinanceRow = useCallback(async (id, values) => {
     const updated = await editRow("finance", id, values);
@@ -5590,19 +4938,14 @@ export default function RSACApp() {
       else d.setMonth(d.getMonth() + every * i);
       const dateStr = d.toISOString().slice(0, 10);
       const saved = await insertRow("tasks", { ...values, dueDate: dateStr, recurrenceGroup: group });
-      if (saved) {
-        setTasks((prev) => [...prev, saved]);
-        // Compromissos recorrentes também vão para o Google Agenda (quando conectado)
-        if (saved.time && googleTokenRef.current) await syncTaskWithGoogle(saved);
-      }
+      if (saved) setTasks((prev) => [...prev, saved]);
     }
-  }, [syncTaskWithGoogle]);
+  }, []);
 
   const removeClientAndClose = (id) => { removeRow("clients", id); setViewClient(null); };
   const removeCaseAndClose = (id) => { removeRow("cases", id); setViewCase(null); };
 
-  const goToTab = (id) => { setTab(id); setViewClient(null); setViewCase(null); setActiveCaseId(null); setContactGroup(null); setSearch(""); setContractDetailId(null); };
-  const openContractDetail = (c) => { goToTab("contracts"); setContractDetailId(c.id); };
+  const goToTab = (id) => { setTab(id); setViewClient(null); setViewCase(null); setActiveCaseId(null); setContactGroup(null); setSearch(""); };
   const openCase = (id) => { setActiveCaseId(id); setViewClient(null); setViewCase(null); };
 
   const toggleTask = useCallback(async (id) => {
@@ -5611,16 +4954,8 @@ export default function RSACApp() {
     const newDone = !t.done;
     const completedAt = newDone ? todayISO() : null;
     setTasks((prev) => prev.map((x) => x.id === id ? { ...x, done: newDone, completedAt } : x));
-    const ok = await updateRow("tasks", id, { done: newDone, completed_at: completedAt }, { quiet: true });
-    if (!ok) {
-      // Atualização otimista desfeita: volta o estado anterior e avisa
-      setTasks((prev) => prev.map((x) => x.id === id ? { ...x, done: t.done, completedAt: t.completedAt } : x));
-      notifyError(newDone ? "Não foi possível concluir a tarefa. Ela voltou para abertas." : "Não foi possível reabrir a tarefa.");
-      return;
-    }
-    // Concluir tira o compromisso futuro do Google; reabrir devolve
-    if (t.time && t.dueDate) await syncTaskWithGoogle({ ...t, done: newDone, completedAt });
-  }, [tasks, syncTaskWithGoogle]);
+    await updateRow("tasks", id, { done: newDone, completed_at: completedAt });
+  }, [tasks]);
 
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "—";
   const useSubmission = (i) => {
@@ -5652,8 +4987,8 @@ export default function RSACApp() {
     { id: "tasks", label: "Todas as tarefas", icon: CheckSquare },
     { id: "calendar", label: "Agenda", icon: CalendarIcon },
     ...(isAdmin ? [
-      { id: "contracts", label: "Contratos", icon: FileText },
       { id: "finance", label: "Financeiro", icon: Wallet },
+      { id: "contracts", label: "Contratos", icon: FileText },
       { id: "quotes", label: "Orçamentos", icon: Calculator },
     ] : []),
   ];
@@ -5720,19 +5055,8 @@ export default function RSACApp() {
   if (session === undefined) {
     return <div style={{ padding: 40, textAlign: "center", color: MUTED, fontFamily: "Georgia, serif" }}>Carregando…</div>;
   }
-  if (!session) return <LoginScreen onClientPortalAccess={setPortalData} />;
+  if (!session) return <LoginScreen onClientPortalAccess={setPortalData} onBackToSite={onBackToSite} />;
   if (loading) return <div style={{ padding: 40, textAlign: "center", color: MUTED, fontFamily: "Georgia, serif" }}>Carregando RSAC…</div>;
-
-  const withUser = (node) => (
-    <CurrentUserContext.Provider value={{ id: session?.user?.id || null }}>
-      <style>{`
-        .rsac-app button:focus-visible, .rsac-app a:focus-visible, .rsac-app input:focus-visible, .rsac-app select:focus-visible, .rsac-app textarea:focus-visible {
-          outline: 2px solid #c9a227; outline-offset: 2px;
-        }
-      `}</style>
-      <div className="rsac-app" style={{ display: "contents" }}>{node}</div>
-    </CurrentUserContext.Provider>
-  );
 
   if (isMobile) {
     const mobileTab = tab === "dashboard" ? "cases" : tab;
@@ -5747,10 +5071,10 @@ export default function RSACApp() {
       calendar: () => { setEditingTask(null); setFolderCaseId(null); setModal("task"); },
     }[mobileTab];
 
-    return withUser(
+    return (
       <div style={{ minHeight: "100vh", background: CONTENT_BG, fontFamily: "Arial, sans-serif" }}>
         {wsCase ? (
-          <MobileCaseScreen key={wsCase.id} item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
+          <MobileCaseScreen item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
             events={events} tasks={tasks} notes={notes} documents={documents} finance={finance}
             onBack={() => setActiveCaseId(null)}
             onEdit={() => { setEditingCase(wsCase); setModal("case"); }}
@@ -5763,7 +5087,7 @@ export default function RSACApp() {
             onAddTask={() => { setFolderCaseId(wsCase.id); setModal("task"); }}
             onEditTask={(t) => { setEditingTask(t); setModal("task"); }}
             onAddNote={() => { setFolderCaseId(wsCase.id); setModal("note"); }}
-            onDeleteNote={deleteNote}
+            onDeleteNote={(id) => removeRow("notes", id)}
             onAddDoc={() => { setFolderCaseId(wsCase.id); setModal("document"); }}
             onDeleteDoc={(id) => removeRow("documents", id)}
             onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
@@ -5774,16 +5098,14 @@ export default function RSACApp() {
             onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)}
             onEditNoteContent={handleEditNoteContent} onTogglePinNote={handleTogglePinNote}
             onCreateTaskFromNote={handleCreateTaskFromNote}
-            onMoveTask={moveTaskToDate}
             onAddNoteRich={(values) => handleAddNote(wsCase.id, values)}
             contracts={contracts} contractCaseIds={contractCaseIds}
             onEditContract={(c) => { setEditingContract(c); setModal("contract"); }}
-            onOpenContract={isAdmin ? openContractDetail : undefined}
             onLinkContract={() => { setContractPrefillCaseId(wsCase.id); setEditingContract(null); setModal("contract"); }} />
         ) : (
           <>
             {mobileTab === "cases" && (
-              <MobileCasosScreen cases={cases} tasks={tasks} search={search} onSearchChange={setSearch} onOpenCase={openCase} caseTypesCatalog={caseTypesCatalog} caseTypesByCaseId={caseTypesByCaseId} />
+              <MobileCasosScreen cases={cases} tasks={tasks} search={search} onSearchChange={setSearch} onOpenCase={openCase} />
             )}
             {mobileTab === "tasks" && (
               <MobileTasksScreen tasks={tasks} cases={cases} onToggle={toggleTask} onDelete={(id) => removeRow("tasks", id)}
@@ -5791,7 +5113,7 @@ export default function RSACApp() {
             )}
             {mobileTab === "calendar" && (
               <div style={{ padding: "16px 18px 100px" }}>
-                <AgendaTab tasks={tasks} events={events} cases={cases} onOpenCase={openCase}
+                <AgendaTab tasks={tasks}
                   onDeleteTask={(id) => removeRow("tasks", id)}
                   onAddTask={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }}
                   onTokenAcquired={setGoogleToken}
@@ -5811,12 +5133,10 @@ export default function RSACApp() {
               <div style={{ padding: "16px 18px 100px" }}>
                 <ContractsPage contracts={contracts} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
                   cases={cases} clients={clients} caseTypesCatalog={caseTypesCatalog}
-                  tasks={tasks} documents={documents} finance={finance}
                   onAdd={() => { setEditingContract(null); setModal("contract"); }}
                   onEdit={(c) => { setEditingContract(c); setModal("contract"); }}
                   onDelete={(id) => handleDeleteContract(id)}
                   onToggleSuspend={handleToggleSuspendContract}
-                  detailId={contractDetailId} onDetailChange={setContractDetailId}
                   onOpenCase={(id) => { setActiveCaseId(id); }} />
               </div>
             )}
@@ -5913,26 +5233,25 @@ export default function RSACApp() {
     );
   }
 
-  return withUser(
+  return (
     <div style={{ display: "flex", minHeight: 560, background: CREAM, fontFamily: "Arial, sans-serif", borderRadius: 10, overflow: "hidden", border: "1px solid #EAE7DC" }}>
       <div style={{ width: 268, background: SIDEBAR_NAVY, padding: "26px 16px 20px", display: "flex", flexDirection: "column", gap: 22, flexShrink: 0 }}>
         <div style={{ textAlign: "center", padding: "0 8px 16px", borderBottom: "1px solid rgba(232,226,213,0.16)" }}>
           <Logo dark />
         </div>
 
-        <nav aria-label="Navegação principal" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {NAV.map((n) => {
             const active = !activeCaseId && tab === n.id;
             const hovered = hoveredNavId === n.id && !active;
             const Icon = n.icon;
             return (
-              <button key={n.id} type="button" onClick={() => goToTab(n.id)} aria-current={active ? "page" : undefined}
+              <button key={n.id} onClick={() => goToTab(n.id)}
                 onMouseEnter={() => setHoveredNavId(n.id)} onMouseLeave={() => setHoveredNavId(null)}
                 style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "10px 12px 10px 9px",
+                display: "flex", alignItems: "center", gap: 12, padding: active ? "10px 12px 10px 9px" : "10px 12px",
                 borderRadius: 6, fontSize: 15, background: active ? NAV_ACTIVE_BG : hovered ? NAV_HOVER_BG : "transparent",
-                borderTop: "none", borderRight: "none", borderBottom: "none",
-                borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "3px solid transparent",
+                borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "none", border: "none",
                 color: active || hovered ? "#f5efe4" : NAV_TEXT_SECONDARY, fontWeight: active ? 600 : 400,
                 cursor: "pointer", textAlign: "left", fontFamily: "inherit", transition: "background 120ms ease, color 120ms ease",
               }}>
@@ -5941,12 +5260,12 @@ export default function RSACApp() {
               </button>
             );
           })}
-        </nav>
+        </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minHeight: 0, overflowY: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 12px 6px" }}>
             <span style={{ fontSize: 10, letterSpacing: 1.5, fontWeight: 600, color: "rgba(240,234,221,0.45)" }}>CASOS ATIVOS</span>
-            <button type="button" aria-label="Novo caso" onClick={() => { setEditingCase(null); setModal("case"); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.7)", fontSize: 15, padding: 0 }}>+</button>
+            <button onClick={() => { setEditingCase(null); setModal("case"); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.5)", fontSize: 15, padding: 0 }}>+</button>
           </div>
           {activeCasesList.length === 0 && (
             <div style={{ padding: "6px 12px", fontSize: 12, color: "rgba(240,234,221,0.4)" }}>Nenhum caso ativo.</div>
@@ -5957,10 +5276,9 @@ export default function RSACApp() {
             const statusColorOnNavy = c.deadline.status === "overdue" || c.deadline.status === "today" ? ALERT_ON_NAVY
               : c.deadline.status === "upcoming" ? GOLD_ACCENT : "rgba(240,234,221,0.45)";
             return (
-              <button key={c.id} type="button" onClick={() => openCase(c.id)} title={c.title} aria-current={active ? "page" : undefined}
+              <div key={c.id} onClick={() => openCase(c.id)} title={c.title}
                 onMouseEnter={() => setHoveredCaseItemId(c.id)} onMouseLeave={() => setHoveredCaseItemId(null)}
                 style={{
-                display: "block", width: "100%", textAlign: "left", fontFamily: "inherit", borderTop: "none", borderRight: "none", borderBottom: "none",
                 padding: "10px 12px", borderRadius: 6, cursor: "pointer",
                 background: active ? NAV_ACTIVE_BG : hovered ? NAV_HOVER_BG : "transparent",
                 borderLeft: active ? `3px solid ${GOLD_ACCENT}` : "3px solid transparent",
@@ -5971,7 +5289,7 @@ export default function RSACApp() {
                   display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
                 }}>{c.title}</div>
                 <div style={{ fontSize: 11, marginTop: 4, color: statusColorOnNavy }}>{c.deadline.label}</div>
-              </button>
+              </div>
             );
           })}
           <button onClick={() => goToTab("cases")} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(240,234,221,0.5)", fontSize: 12, textAlign: "left", padding: "8px 12px 0" }}>Ver todos os casos →</button>
@@ -6003,7 +5321,7 @@ export default function RSACApp() {
             const wsCase = cases.find((c) => c.id === activeCaseId);
             if (!wsCase) return <Empty text="Caso não encontrado." />;
             return (
-              <CaseWorkspace key={wsCase.id} item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
+              <CaseWorkspace item={wsCase} client={clients.find((c) => c.id === wsCase.clientId)} clients={clients}
                 events={events} tasks={tasks} notes={notes} documents={documents} precedents={precedents} finance={finance}
                 onEdit={() => { setEditingCase(wsCase); setModal("case"); }}
                 onDelete={() => { removeRow("cases", wsCase.id); setActiveCaseId(null); }}
@@ -6016,7 +5334,7 @@ export default function RSACApp() {
                 onAddTask={() => { setFolderCaseId(wsCase.id); setModal("task"); }}
                 onEditTask={(t) => { setEditingTask(t); setModal("task"); }}
                 onAddNote={() => { setFolderCaseId(wsCase.id); setModal("note"); }}
-                onDeleteNote={deleteNote}
+                onDeleteNote={(id) => removeRow("notes", id)}
                 onAddDoc={() => { setFolderCaseId(wsCase.id); setModal("document"); }}
                 onDeleteDoc={(id) => removeRow("documents", id)}
                 onAddExpense={() => { setFinanceContext({ caseId: wsCase.id, clientId: wsCase.clientId, presetType: "Despesa" }); setModal("finance"); }}
@@ -6027,11 +5345,9 @@ export default function RSACApp() {
                 onRemoveCaseType={(typeId) => handleRemoveCaseType(wsCase.id, typeId)}
                 onEditNoteContent={handleEditNoteContent} onTogglePinNote={handleTogglePinNote}
                 onCreateTaskFromNote={handleCreateTaskFromNote}
-                onMoveTask={moveTaskToDate}
                 onAddNoteRich={(values) => handleAddNote(wsCase.id, values)}
                 contracts={contracts} contractCaseIds={contractCaseIds}
                 onEditContract={(c) => { setEditingContract(c); setModal("contract"); }}
-                onOpenContract={isAdmin ? openContractDetail : undefined}
                 onLinkContract={() => { setContractPrefillCaseId(wsCase.id); setEditingContract(null); setModal("contract"); }} />
             );
           })()
@@ -6047,51 +5363,6 @@ export default function RSACApp() {
               <StatCard icon={CheckSquare} label="Tarefas em aberto" value={openTasks} />
               <StatCard icon={CalendarIcon} label="Compromissos" value={tasks.filter((t) => t.time).length} />
             </div>
-            {isAdmin && (() => {
-              const expiring = contracts
-                .map((c) => ({ ...c, status: deriveContractStatus(c) }))
-                .filter((c) => c.status === "expiring")
-                .sort((a, b) => {
-                  if (!!a.autoRenew !== !!b.autoRenew) return a.autoRenew ? 1 : -1; // sem renovação automática primeiro
-                  return (a.endDate || "").localeCompare(b.endDate || "");
-                });
-              if (expiring.length === 0) return null;
-              const semRenovacao = expiring.filter((c) => !c.autoRenew).length;
-              return (
-                <section aria-label="Contratos a vencer" style={{ background: "#fff", border: "1px solid #e6e0d2", borderLeft: "3px solid #c04a40", borderRadius: 10, padding: "18px 20px", marginBottom: 20 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
-                    <h3 style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY, margin: 0 }}>
-                      {expiring.length} contrato{expiring.length > 1 ? "s vencem" : " vence"} em até 60 dias
-                    </h3>
-                    <span style={{ fontSize: 12.5, color: semRenovacao ? "#a8382f" : "#857d6c", fontWeight: semRenovacao ? 600 : 400 }}>
-                      {semRenovacao ? `${semRenovacao} sem renovação automática — precisa de ação` : "todos renovam automaticamente"}
-                    </span>
-                  </div>
-                  {expiring.slice(0, 5).map((c) => {
-                    const days = Math.round((new Date(c.endDate + "T00:00:00") - new Date(todayISO() + "T00:00:00")) / 86400000);
-                    return (
-                      <button key={c.id} type="button" onClick={() => openContractDetail(c)} style={{
-                        display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap",
-                        background: "none", border: "none", borderTop: "1px solid #F1EFE8", padding: "10px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                      }}>
-                        <span style={{ minWidth: 0 }}>
-                          <span style={{ display: "block", fontSize: 14, color: INK }}>{c.title}</span>
-                          <span style={{ display: "block", fontSize: 12, color: MUTED }}>{clientName(c.clientId)} · vence em {fmtDate(c.endDate)}</span>
-                        </span>
-                        <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", color: c.autoRenew ? "#8a6d3b" : "#a8382f" }}>
-                          {days} dia{days === 1 ? "" : "s"} · {c.autoRenew ? "renova sozinho" : "não renova"} ›
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {expiring.length > 5 && (
-                    <button type="button" onClick={() => goToTab("contracts")} style={{ background: "none", border: "none", padding: "8px 0 0", color: NAVY, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }}>
-                      Ver todos os contratos ›
-                    </button>
-                  )}
-                </section>
-              );
-            })()}
             <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
               <div style={{ flex: "2 1 320px", background: "#fff", border: "1px solid #EAE7DC", borderRadius: 10, padding: 20 }}>
                 <h3 style={{ fontFamily: "Georgia, serif", fontSize: 15, color: NAVY, margin: "0 0 14px" }}>Casos recentes</h3>
@@ -6204,37 +5475,15 @@ export default function RSACApp() {
 
         {tab === "cases" && (
           <ListPage title="Casos" subtitle="Processos e casos em andamento, agrupados por cliente." onAdd={() => { setEditingCase(null); setModal("case"); }}>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: MUTED }}>
-                  Filtrar
-                  <select value={caseTypeFilter} onChange={(e) => setCaseTypeFilter(e.target.value)} style={{ border: "1px solid #E3E0D6", borderRadius: 6, padding: "7px 10px", fontSize: 13, color: INK, background: "#fff" }}>
-                    <option value="todos">Tipo: todos</option>
-                    <option value="__Judicial">Judicial</option>
-                    <option value="__Consultoria">Consultoria (todas)</option>
-                    {caseTypesCatalog.length > 0 && (
-                      <optgroup label="Tipos de consultoria">
-                        {caseTypesCatalog.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      </optgroup>
-                    )}
-                  </select>
-                </label>
-              </div>
               {(() => {
-                const filteredCases = cases.filter((c) => {
-                  if (caseTypeFilter === "todos") return true;
-                  if (caseTypeFilter === "__Judicial") return c.caseType !== "Consultoria";
-                  if (caseTypeFilter === "__Consultoria") return c.caseType === "Consultoria";
-                  return (caseTypesByCaseId[c.id] || []).some((t) => t.id === caseTypeFilter);
-                });
                 const byClient = {};
-                filteredCases.forEach((c) => { (byClient[c.clientId || "sem-cliente"] = byClient[c.clientId || "sem-cliente"] || []).push(c); });
+                cases.forEach((c) => { (byClient[c.clientId || "sem-cliente"] = byClient[c.clientId || "sem-cliente"] || []).push(c); });
                 const clientIds = Object.keys(byClient);
-                if (cases.length === 0) return <Empty text="Nenhum caso cadastrado. Adicione o primeiro." />;
-                if (clientIds.length === 0) return <Empty text="Nenhum caso com esse tipo." />;
+                if (clientIds.length === 0) return <Empty text="Nenhum caso cadastrado. Adicione o primeiro." />;
                 return clientIds.map((cid) => {
                   const items = byClient[cid];
                   const label = cid === "sem-cliente" ? "Sem cliente vinculado" : clientName(cid);
-                  const expanded = expandedCaseClient === cid || caseTypeFilter !== "todos";
+                  const expanded = expandedCaseClient === cid;
                   return (
                     <div key={cid} style={{ marginBottom: 8 }}>
                       <div onClick={() => setExpandedCaseClient(expanded ? null : cid)} style={{
@@ -6357,7 +5606,7 @@ export default function RSACApp() {
         )}
 
         {tab === "calendar" && (
-          <AgendaTab tasks={tasks} events={events} cases={cases} onOpenCase={openCase}
+          <AgendaTab tasks={tasks}
             onDeleteTask={(id) => removeRow("tasks", id)}
             onAddTask={() => { setEditingTask(null); setFolderCaseId(null); setModal("task"); }}
             onTokenAcquired={setGoogleToken}
@@ -6375,12 +5624,10 @@ export default function RSACApp() {
         {tab === "contracts" && isAdmin && (
           <ContractsPage contracts={contracts} contractCaseIds={contractCaseIds} contractTypesByContractId={contractTypesByContractId}
             cases={cases} clients={clients} caseTypesCatalog={caseTypesCatalog}
-            tasks={tasks} documents={documents} finance={finance}
             onAdd={() => { setEditingContract(null); setModal("contract"); }}
             onEdit={(c) => { setEditingContract(c); setModal("contract"); }}
             onDelete={(id) => handleDeleteContract(id)}
             onToggleSuspend={handleToggleSuspendContract}
-            detailId={contractDetailId} onDetailChange={setContractDetailId}
             onOpenCase={(id) => openCase(id)} />
         )}
 
@@ -6429,4 +5676,26 @@ export default function RSACApp() {
       )}
     </div>
   );
+}
+
+/* ===== Raiz: site público (/, /sobre, /areas…) x sistema (/equipe, /portal) ===== */
+const normPath = (p) => (p.replace(/\/+$/, "") || "/");
+const isAppPath = (p) => p === "/equipe" || p.startsWith("/equipe/") || p === "/portal" || p.startsWith("/portal/");
+
+export default function Root() {
+  const [path, setPath] = useState(() => normPath(window.location.pathname));
+  useEffect(() => {
+    const onPop = () => setPath(normPath(window.location.pathname));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const navigate = (to) => {
+    window.history.pushState({}, "", to);
+    setPath(normPath(to.split("#")[0].split("?")[0]));
+    window.scrollTo(0, 0);
+  };
+  // links de autenticação do Supabase (recuperação de senha etc.) devem cair no sistema
+  const authHash = /access_token|type=recovery|error_description/.test(window.location.hash || "");
+  if (authHash || isAppPath(path)) return <RSACApp onBackToSite={() => navigate("/")} />;
+  return <PublicSite path={path} navigate={navigate} onTeam={() => navigate("/equipe")} onPortal={() => navigate("/portal")} />;
 }
