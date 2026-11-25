@@ -5,12 +5,15 @@ import { supabase } from "./supabaseClient.js";
    Site público RSAC — página inicial única (âncoras)
    Rotas: /  (e /sobre /areas /como-atuamos /contato rolam até a seção)
    /portal e /equipe pertencem ao sistema (ver App.jsx).
-   Imagens em public/assets/. Conteúdo informativo (Provimento 205/2021).
+   Imagens em public/assets/; fontes hospedadas localmente em public/fonts/ (sem chamadas a terceiros). Conteúdo informativo (Provimento 205/2021).
    ============================================================ */
 
 const TAGLINE = "Advogados especializados"; // ver observação sobre o Provimento 205/2021
 const EMAIL = "escritorio.rsac@gmail.com";
 const WHATS_NUM = "5511933596958";
+const CONTROLADOR = "Rodrigo Luiz Chaves de Sousa Santos";
+const CNPJ = ""; // preencha se desejar exibir (ex.: "00.000.000/0000-00")
+const PRIV_ATUALIZ = "22 de novembro de 2026";
 const LINKEDIN = "https://www.linkedin.com/in/rodrigolcssantos";
 
 const TOPICS = ["Holding e patrimônio da família", "M&A (compra, venda ou investimento)", "Reforma tributária (CBS e IBS)", "Planejamento tributário", "Reorganização societária", "Sucessão e ITCMD", "Outro assunto"];
@@ -53,6 +56,13 @@ const ETAPAS = [
 const SECTION_BY_PATH = { "/sobre": "sobre", "/areas": "areas", "/como-atuamos": "como", "/contato": "contato" };
 
 const CSS = `
+@font-face{font-family:"Newsreader";font-style:normal;font-weight:400;font-display:swap;src:url("/fonts/newsreader-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Newsreader";font-style:normal;font-weight:500;font-display:swap;src:url("/fonts/newsreader-latin-500-normal.woff2") format("woff2")}
+@font-face{font-family:"Newsreader";font-style:normal;font-weight:600;font-display:swap;src:url("/fonts/newsreader-latin-600-normal.woff2") format("woff2")}
+@font-face{font-family:"Newsreader";font-style:italic;font-weight:400;font-display:swap;src:url("/fonts/newsreader-latin-400-italic.woff2") format("woff2")}
+@font-face{font-family:"Inter";font-style:normal;font-weight:400;font-display:swap;src:url("/fonts/inter-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Inter";font-style:normal;font-weight:500;font-display:swap;src:url("/fonts/inter-latin-500-normal.woff2") format("woff2")}
+@font-face{font-family:"Inter";font-style:normal;font-weight:600;font-display:swap;src:url("/fonts/inter-latin-600-normal.woff2") format("woff2")}
 .pw{--bg:#F3F5F6;--surface:#FFFFFF;--ink:#14202B;--muted:#56636F;--line:#D9DFE3;--navy:#0E2841;--navy-2:#15304D;--on-navy:#F1F3F4;--on-navy-muted:#A9B7C4;--gold:#A9843F;--gold-soft:#C9A96A;--logo:url("/assets/logo-curto-claro.png");
   --serif:"Newsreader",Georgia,"Times New Roman",serif;--sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
   background:var(--bg);color:var(--ink);font:400 16px/1.65 var(--sans);min-height:100vh;-webkit-font-smoothing:antialiased}
@@ -184,6 +194,19 @@ html{scroll-behavior:smooth}
 .pw .wa{position:fixed;right:18px;bottom:18px;z-index:25;display:flex;align-items:center;gap:10px;background:#1F9D55;color:#fff!important;text-decoration:none;border-radius:40px;padding:13px 20px;font:600 14px/1 var(--sans);box-shadow:0 8px 24px rgba(0,0,0,.28)}
 .pw .wa:hover{filter:brightness(1.08)}
 @media (max-width:520px){.pw .wa span{display:none}.pw .wa{padding:14px}}
+.pw .doc{max-width:760px;padding-block:64px 88px}
+.pw .doc h1{font-size:clamp(32px,4vw,46px);line-height:1.1;margin:14px 0 10px}
+.pw .doc .upd{color:var(--muted);font-size:14px;margin:0 0 36px}
+.pw .doc h2{font-size:25px;line-height:1.2;margin:38px 0 12px}
+.pw .doc p,.pw .doc li{color:var(--ink);font-size:16px;margin:0 0 12px}
+.pw .doc ul{margin:0 0 14px;padding-left:22px}
+.pw .doc a{color:var(--gold);text-underline-offset:3px}
+.pw .doc .back{display:block;margin-bottom:26px;font-size:14px;color:var(--muted);text-decoration:none}
+.pw .cform .ck{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.5;color:var(--on-navy-muted)}
+.pw .cform .ck input{width:auto;margin-top:3px;flex:0 0 auto;accent-color:var(--gold-soft)}
+.pw .cform .ck label{display:inline;font:inherit;letter-spacing:0;text-transform:none;color:inherit;margin:0}
+.pw .cform .ck a,.pw .priv a{color:var(--on-navy);text-underline-offset:3px}
+.pw footer a{color:var(--muted);text-underline-offset:3px}
 .pw .veil{position:fixed;inset:0;background:rgba(8,19,29,.62);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px}
 .pw .login{background:var(--surface);color:var(--ink);width:100%;max-width:420px;border-top:3px solid var(--gold);padding:30px 28px 26px;position:relative;max-height:100%;overflow:auto}
 .pw .login h2{font-size:28px;margin:10px 0 6px}
@@ -208,12 +231,6 @@ function useHead(title, description) {
     let m = document.querySelector('meta[name="description"]');
     if (!m) { m = document.createElement("meta"); m.setAttribute("name", "description"); document.head.appendChild(m); }
     m.setAttribute("content", description);
-    if (!document.getElementById("pw-fonts")) {
-      const l = document.createElement("link");
-      l.id = "pw-fonts"; l.rel = "stylesheet";
-      l.href = "https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600&display=swap";
-      document.head.appendChild(l);
-    }
     if (!document.getElementById("pw-style")) {
       const s = document.createElement("style");
       s.id = "pw-style"; s.textContent = CSS; document.head.appendChild(s);
@@ -277,11 +294,12 @@ function Hero() {
 
 function Contact({ topic, setTopic }) {
   const [f, setF] = useState({ nome: "", contato: "", msg: "" });
+  const [ok, setOk] = useState(false);
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const body = () => `Olá, sou ${f.nome.trim()}.\nTema: ${topic}.\n\n${f.msg.trim()}\n\nContato: ${f.contato.trim() || "-"}`;
-  const valid = () => { if (!f.nome.trim() || !f.msg.trim()) { setErr("Informe seu nome e uma breve descrição da situação."); return false; } setErr(""); return true; };
+  const valid = () => { if (!f.nome.trim() || !f.msg.trim()) { setErr("Informe seu nome e uma breve descrição da situação."); return false; } if (!ok) { setErr("Para enviar, confirme que leu o Aviso de Privacidade."); return false; } setErr(""); return true; };
   const viaWhats = () => { if (valid()) window.open(waLink(body()), "_blank", "noopener"); };
   const viaMail = () => { if (valid()) window.location.href = `mailto:${EMAIL}?subject=${encodeURIComponent("Contato pelo site — " + topic)}&body=${encodeURIComponent(body())}`; };
   const copy = () => {
@@ -304,12 +322,16 @@ function Contact({ topic, setTopic }) {
               <div><label htmlFor="c-ct">E-mail ou telefone</label><input id="c-ct" value={f.contato} onChange={set("contato")} autoComplete="email" /></div>
             </div>
             <div><label htmlFor="c-msg">Descrição breve da situação</label><textarea id="c-msg" rows={4} value={f.msg} onChange={set("msg")} /></div>
-            {err && <p className="err">{err}</p>}
+            <div className="ck">
+              <input id="c-ok" type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} />
+              <label htmlFor="c-ok">Li o <a href="/privacidade" target="_blank" rel="noopener">Aviso de Privacidade</a> e estou ciente de que meus dados serão usados para retorno deste contato.</label>
+            </div>
+            {err && <p className="err" role="alert">{err}</p>}
             <div className="acts">
               <button type="button" className="btn gold" onClick={viaWhats}>Enviar pelo WhatsApp</button>
               <button type="button" className="btn ghost" onClick={viaMail}>Enviar por e-mail</button>
             </div>
-            <p className="priv">Os dados informados são usados apenas para retorno do contato e não são armazenados neste site.</p>
+            <p className="priv">Este site não guarda o que você escreve: ao enviar, a mensagem segue para o WhatsApp ou para o seu programa de e-mail, e fica registrada nesses serviços. Veja o <a href="/privacidade" target="_blank" rel="noopener">Aviso de Privacidade</a>.</p>
           </div>
         </div>
         <div className="box">
@@ -463,13 +485,67 @@ function Home({ path, openLogin }) {
       <footer>
         <div className="wrap">
           <span>© 2026 RSAC · Rodrigo Santos Advocacia e Consultoria</span>
-          <span>Conteúdo informativo, sem caráter de aconselhamento jurídico individual. Os resultados dependem de análise de cada caso.</span>
+          <span>Conteúdo informativo, sem caráter de aconselhamento jurídico individual. Os resultados dependem de análise de cada caso. · <a href="/privacidade">Privacidade e LGPD</a></span>
         </div>
       </footer>
       <a className="wa" href={waLink("Olá, gostaria de agendar uma conversa reservada com o escritório.")} target="_blank" rel="noopener noreferrer" aria-label="Falar pelo WhatsApp">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.7.8-.8 1-.3.2-.5.1a6.700 6.700 0 0 1-3.300-2.900c-.2-.4.2-.4.700-1.300a.5.5 0 0 0 0-.5l-.8-1.800c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.200 5.200 5.200 0 0 0 1.100 2.800 11.900 11.900 0 0 0 4.600 4c1.700.7 2.400.8 3.200.7a2.700 2.700 0 0 0 1.800-1.300 2.200 2.200 0 0 0 .2-1.300c-.1-.1-.3-.2-.5-.3Z" /></svg>
         <span>Falar pelo WhatsApp</span>
       </a>
+    </>
+  );
+}
+
+function Privacy() {
+  useHead("Aviso de Privacidade | RSAC", "Como o escritório RSAC trata dados pessoais, em conformidade com a Lei Geral de Proteção de Dados (LGPD), e como exercer seus direitos como titular.");
+  useEffect(() => { window.scrollTo(0, 0); }, []);
+  const mail = (assunto) => `mailto:${EMAIL}?subject=${encodeURIComponent(assunto)}`;
+  return (
+    <>
+      <header><div className="wrap bar"><a className="brand" href="/" aria-label="RSAC - voltar ao início"><span className="logo" role="img" aria-label="RSAC" /><span className="nm">Rodrigo Santos<br />Advocacia e Consultoria</span></a></div></header>
+      <main className="wrap doc" id="topo">
+        <a className="back" href="/">← Voltar ao site</a>
+        <span className="eyebrow">LGPD · Lei 13.709/2018</span>
+        <h1>Aviso de Privacidade</h1>
+        <p className="upd">Atualizado em {PRIV_ATUALIZ}.</p>
+
+        <h2>1. Quem é o controlador</h2>
+        <p>O controlador dos dados tratados por meio deste site é <b>{CONTROLADOR}</b>, advogado, responsável pelo escritório Rodrigo Santos Advocacia e Consultoria (RSAC){CNPJ ? <>, CNPJ {CNPJ}</> : null}. O escritório não possui sede aberta ao público; o atendimento ocorre mediante agendamento.</p>
+        <p>Canal para assuntos de privacidade e proteção de dados: <a href={mail("Privacidade e dados pessoais")}>{EMAIL}</a>.</p>
+
+        <h2>2. Quais dados tratamos e para quê</h2>
+        <ul>
+          <li><b>Formulário de contato:</b> nome, e-mail ou telefone, tema e a descrição que você escrever. Usamos apenas para responder à sua solicitação e agendar o atendimento. O site não grava esses dados: ao clicar em enviar, a mensagem é aberta no WhatsApp ou no seu programa de e-mail, e é você quem a envia.</li>
+          <li><b>Contato direto</b> por e-mail, WhatsApp ou LinkedIn: os dados que você fornecer na conversa.</li>
+          <li><b>Áreas restritas (Portal do Cliente e Acesso da Equipe):</b> código de acesso ou e-mail e senha, usados apenas para autenticação. Os dados de processos e documentos exibidos no portal são tratados no âmbito do contrato de serviços advocatícios.</li>
+          <li><b>Dados de navegação:</b> este site não usa cookies de publicidade, estatística ou rastreamento, nem ferramentas de análise de terceiros. As fontes de letra são servidas pelo próprio site. Servidores de hospedagem podem registrar o endereço IP e dados técnicos do acesso por razões de segurança e funcionamento.</li>
+        </ul>
+        <p>Pedimos que <b>não envie documentos, dados sensíveis (como saúde ou origem racial), dados de terceiros ou senhas</b> na primeira mensagem. Se isso for necessário, será combinado um canal adequado depois do primeiro contato.</p>
+
+        <h2>3. Bases legais</h2>
+        <p>Tratamos seus dados com base no art. 7º da LGPD: <b>procedimentos preliminares relacionados a contrato</b>, a pedido do titular (inciso V), para responder ao seu contato; <b>execução de contrato</b> (inciso V), quando houver contratação; <b>cumprimento de obrigação legal ou regulatória</b> (inciso II), como as normas da OAB e a legislação fiscal; <b>exercício regular de direitos</b> em processo judicial, administrativo ou arbitral (inciso VI); e <b>legítimo interesse</b> (inciso IX), para a segurança do site e do sistema, sempre respeitados seus direitos e expectativas.</p>
+
+        <h2>4. Com quem os dados podem ser compartilhados</h2>
+        <p>Não vendemos nem cedemos dados para publicidade. O compartilhamento ocorre apenas quando necessário: com serviços usados por você ao enviar a mensagem (WhatsApp, operado pela Meta, e o seu provedor de e-mail); com prestadores de tecnologia que hospedam o site e o sistema do escritório (Vercel e Supabase), sob contratos com obrigações de segurança; e com autoridades, quando houver determinação legal. Alguns desses prestadores podem armazenar dados fora do Brasil (transferência internacional, art. 33 da LGPD), com garantias contratuais adequadas.</p>
+
+        <h2>5. Sigilo profissional</h2>
+        <p>Os dados de clientes e de pessoas em atendimento estão protegidos pelo sigilo profissional previsto no Estatuto da Advocacia (Lei 8.906/1994) e no Código de Ética e Disciplina da OAB, que se somam às regras da LGPD.</p>
+
+        <h2>6. Por quanto tempo guardamos</h2>
+        <p>Mensagens de pessoas que não se tornam clientes são mantidas pelo tempo necessário para o atendimento e, em regra, por até <b>12 meses</b>, quando são eliminadas. Dados de clientes são guardados durante o contrato e pelos prazos exigidos em lei e pelas normas da OAB, ou até o fim de eventual discussão judicial.</p>
+
+        <h2>7. Seus direitos como titular</h2>
+        <p>Nos termos do art. 18 da LGPD, você pode solicitar: confirmação de que tratamos seus dados; acesso; correção; anonimização, bloqueio ou eliminação de dados desnecessários ou excessivos; portabilidade; informação sobre compartilhamentos; informação sobre a possibilidade de não consentir e suas consequências; e revogação do consentimento, quando for a base legal. Alguns pedidos podem ser limitados por obrigação legal ou pelo sigilo profissional, e nesse caso explicaremos o motivo.</p>
+        <p>Para exercer seus direitos, escreva para <a href={mail("Direitos do titular de dados (LGPD)")}>{EMAIL}</a>, indicando seu nome e o que deseja. Podemos pedir informações para confirmar sua identidade. Respondemos em até 15 dias.</p>
+        <p>Se entender que seus dados foram tratados de forma irregular, você também pode apresentar petição à Autoridade Nacional de Proteção de Dados (ANPD), em <a href="https://www.gov.br/anpd" target="_blank" rel="noopener noreferrer">gov.br/anpd</a>.</p>
+
+        <h2>8. Segurança</h2>
+        <p>Adotamos medidas técnicas e administrativas para proteger os dados: conexão criptografada (HTTPS), acesso restrito por convite e perfis de permissão na área da equipe, e controle de acesso ao banco de dados. O escritório nunca pede senha por e-mail ou mensagem, nem solicita depósitos ou PIX sem contrato prévio. Em caso de dúvida sobre uma mensagem recebida em nome do escritório, confirme pelo e-mail acima.</p>
+
+        <h2>9. Alterações deste aviso</h2>
+        <p>Este aviso pode ser atualizado, e a data de revisão aparece no topo. Se passarmos a usar cookies de análise ou outras ferramentas de terceiros, informaremos aqui e pediremos seu consentimento quando exigido.</p>
+      </main>
+      <footer><div className="wrap"><span>© 2026 RSAC · Rodrigo Santos Advocacia e Consultoria</span><a href="/">Voltar ao início</a></div></footer>
     </>
   );
 }
@@ -492,7 +568,7 @@ export default function PublicSite({ path, navigate, onTeam, onPortal }) {
   const isHome = path === "/" || Object.prototype.hasOwnProperty.call(SECTION_BY_PATH, path);
   return (
     <div className="pw">
-      {isHome ? <Home path={path} openLogin={() => setLogin(true)} /> : <NotFound />}
+      {isHome ? <Home path={path} openLogin={() => setLogin(true)} /> : path === "/privacidade" ? <Privacy /> : <NotFound />}
       {login && <LoginModal onClose={() => setLogin(false)} onTeam={() => { setLogin(false); onTeam(); }} onPortal={() => { setLogin(false); onPortal(); }} />}
     </div>
   );
